@@ -22,7 +22,6 @@ def carregar_base():
         try:
             df = pd.read_excel(EXCEL_PATH)
             df.columns = [c.strip() for c in df.columns]
-            # Ajuste das colunas conforme o seu ficheiro
             col_preco = "VALORES ATUAIS JANEIRO 2025"
             df = df[["CÓDIGO", "DESCRIÇÃO", "UNID", col_preco]].dropna(subset=["CÓDIGO"])
             df.rename(columns={col_preco: "Preço Unitário"}, inplace=True)
@@ -45,7 +44,7 @@ if "dados_cliente" not in st.session_state:
     st.session_state.dados_cliente = {"nome": "", "tel": "", "morada": "", "iva": 23}
 
 # --------------------------------------------------
-# 3. INTERFACE SUPERIOR
+# 3. INTERFACE SUPERIOR (DADOS CLIENTE E TOTAL)
 # --------------------------------------------------
 col_log, col_info, col_exp = st.columns([1, 2, 1.5])
 
@@ -61,64 +60,76 @@ with col_info:
     st.session_state.dados_cliente["morada"] = st.text_input("Morada", st.session_state.dados_cliente["morada"])
 
 with col_exp:
-    st.subheader("💰 Resumo Financeiro")
+    st.subheader("💰 Resumo")
     iva = st.selectbox("IVA (%)", [0, 6, 13, 23], index=3)
     
     if not st.session_state.itens_orcamento.empty:
         df_calc = st.session_state.itens_orcamento
         subtotal = (df_calc["Quantidade"] * df_calc["Preço Unitário"]).sum()
         total = subtotal * (1 + iva/100)
-        st.markdown(f"#### **Total Orçado: {total:,.2f} €**")
-        st.caption(f"Subtotal: {subtotal:,.2f} € | IVA: {iva}%")
+        st.markdown(f"#### **Total: {total:,.2f} €**")
     else:
-        st.info("Adicione itens para calcular o total.")
+        st.info("Adicione itens.")
 
 # --------------------------------------------------
-# 4. PESQUISA E ADIÇÃO (QUANTIDADE VAI A ZERO)
+# 4. PESQUISA "USER FRIENDLY" (BOTÃO POR LINHA)
 # --------------------------------------------------
 st.divider()
-st.subheader("🔍 1. Pesquisar e Selecionar Artigos")
+st.subheader("🔍 1. Pesquisar e Adicionar Artigos")
 
-pesquisa = st.text_input("Procure por Nome ou Código...")
+pesquisa = st.text_input("Digite o termo de pesquisa (ex: picar, arp, etc):")
 
 if pesquisa:
     mask = (st.session_state.base_dados["DESCRIÇÃO"].str.contains(pesquisa, case=False, na=False)) | \
            (st.session_state.base_dados["CÓDIGO"].str.contains(pesquisa, case=False, na=False))
     
-    resultados = st.session_state.base_dados[mask].copy()
+    resultados = st.session_state.base_dados[mask].head(20) # Limite para performance
     
     if not resultados.empty:
-        st.dataframe(resultados, use_container_width=True, hide_index=True)
+        # Cabeçalho da lista de pesquisa
+        h1, h2, h3, h4, h5 = st.columns([1, 3, 1, 1, 0.5])
+        h1.caption("**Cód**")
+        h2.caption("**Descrição**")
+        h3.caption("**Preço Unit.**")
+        h4.caption("**Quantidade**")
+        h5.caption("**Add**")
         
-        # Menu para escolher o item exato
-        escolha = st.selectbox("Selecione o item para adicionar à lista abaixo:", 
-                                resultados["CÓDIGO"] + " - " + resultados["DESCRIÇÃO"])
-        
-        if st.button("➕ Adicionar ao Orçamento"):
-            cod_id = escolha.split(" - ")[0]
-            item_base = st.session_state.base_dados[st.session_state.base_dados["CÓDIGO"] == cod_id].iloc[0]
-            
-            # CRIAR NOVO ITEM COM QUANTIDADE 0.00
-            novo_item = pd.DataFrame([{
-                "CÓDIGO": item_base["CÓDIGO"],
-                "Artigo": item_base["DESCRIÇÃO"],
-                "UNID": item_base["UNID"],
-                "Preço Unitário": item_base["Preço Unitário"],
-                "Quantidade": 0.00  # <--- Definido como zero como pretendido
-            }])
-            
-            # Adicionar à lista de apurados
-            st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo_item], ignore_index=True)
-            st.rerun()
+        for i, row in resultados.iterrows():
+            with st.container():
+                c1, c2, c3, c4, c5 = st.columns([1, 3, 1, 1, 0.5])
+                
+                c1.write(row["CÓDIGO"])
+                c2.write(row["DESCRIÇÃO"])
+                c3.write(f"{row['Preço Unitário']:.2f} €")
+                
+                # Input de quantidade único para cada linha
+                qtd = c4.number_input("Qtd", min_value=0.0, value=0.0, step=1.0, key=f"qtd_{row['CÓDIGO']}", label_visibility="collapsed")
+                
+                # Botão Mais (+) para adicionar
+                if c5.button("➕", key=f"btn_{row['CÓDIGO']}"):
+                    if qtd > 0:
+                        novo_item = pd.DataFrame([{
+                            "CÓDIGO": row["CÓDIGO"],
+                            "Artigo": row["DESCRIÇÃO"],
+                            "UNID": row["UNID"],
+                            "Preço Unitário": row["Preço Unitário"],
+                            "Quantidade": qtd
+                        }])
+                        st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo_item], ignore_index=True)
+                        st.success(f"Adicionado: {row['CÓDIGO']}")
+                        st.rerun()
+                    else:
+                        st.error("Insira Qtd > 0")
+    else:
+        st.warning("Nenhum item encontrado.")
 
 # --------------------------------------------------
-# 5. ITENS APURADOS (ONDE SE COLOCA A QUANTIDADE)
+# 5. ITENS APURADOS (TABELA FINAL)
 # --------------------------------------------------
 st.divider()
-st.subheader("📝 2. Itens Apurados (Insira as Quantidades)")
+st.subheader("📝 2. Itens Apurados (No Orçamento)")
 
 if not st.session_state.itens_orcamento.empty:
-    # O utilizador edita diretamente a quantidade aqui
     df_editado = st.data_editor(
         st.session_state.itens_orcamento,
         use_container_width=True,
@@ -128,15 +139,21 @@ if not st.session_state.itens_orcamento.empty:
         column_config={
             "CÓDIGO": st.column_config.TextColumn("Cód", disabled=True),
             "Artigo": st.column_config.TextColumn("Descrição", width="large", disabled=True),
-            "UNID": st.column_config.TextColumn("UM", disabled=True),
-            "Preço Unitário": st.column_config.NumberColumn("Preço (€)", format="%.2f"),
-            "Quantidade": st.column_config.NumberColumn("Qtd (Coloque aqui)", min_value=0.0, format="%.2f", required=True)
+            "Preço Unitário": st.column_config.NumberColumn("V. Unit (€)", format="%.2f"),
+            "Quantidade": st.column_config.NumberColumn("Qtd", format="%.2f")
         }
     )
     
-    # Atualizar o estado global com os valores inseridos
-    if st.button("💾 Validar Quantidades e Totais"):
+    if st.button("💾 Guardar Alterações da Tabela"):
         st.session_state.itens_orcamento = df_editado
         st.rerun()
 else:
-    st.warning("Pesquise e adicione itens acima para que apareçam aqui.")
+    st.write("Pesquise e clique no ➕ para adicionar itens.")
+
+# --------------------------------------------------
+# 6. SIDEBAR (LIMPAR TUDO)
+# --------------------------------------------------
+with st.sidebar:
+    if st.button("🗑️ Limpar Todo o Orçamento"):
+        st.session_state.itens_orcamento = pd.DataFrame(columns=["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"])
+        st.rerun()
