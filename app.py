@@ -19,7 +19,7 @@ LOGO_PATH = "logo.png"
 EXCEL_PATH = "Cópia de Preços Tabela atual.xlsx"
 
 # --------------------------------------------------
-# 2. Funções de Dados
+# 2. Funções de Suporte
 # --------------------------------------------------
 def carregar_base_limpa():
     if os.path.exists(EXCEL_PATH):
@@ -31,26 +31,23 @@ def carregar_base_limpa():
             df["Quantidade"] = 0.0
             return df
         except:
-            st.error("Erro ao carregar colunas do Excel. Verifique o ficheiro.")
+            st.error("Erro ao ler o Excel. Verifique se o ficheiro e as colunas estão corretos.")
     return pd.DataFrame(columns=["CÓDIGO", "DESCRIÇÃO", "UNID", "Preço Unitário", "Quantidade"])
 
 def sincronizar_dados(key_editor):
-    """Sincroniza as tabelas editáveis com a base de dados principal na sessão"""
     if key_editor in st.session_state:
         edicoes = st.session_state[key_editor]
         res = st.session_state["lista_orcamentos"][st.session_state["orc_atual"]]
         
-        # Processar alterações de valores (Preço ou Quantidade)
         for row_idx, alteracoes in edicoes["edited_rows"].items():
             for col, val in alteracoes.items():
                 res["dados"].at[row_idx, col] = val
         
-        # Processar remoções (O 'X' ou Delete na tabela)
         for row_idx in edicoes["deleted_rows"]:
             res["dados"].at[row_idx, "Quantidade"] = 0.0
 
 # --------------------------------------------------
-# 3. Inicialização do Estado
+# 3. Estado da Sessão
 # --------------------------------------------------
 if "lista_orcamentos" not in st.session_state:
     st.session_state["lista_orcamentos"] = {
@@ -64,9 +61,9 @@ if "lista_orcamentos" not in st.session_state:
 res = st.session_state["lista_orcamentos"][st.session_state["orc_atual"]]
 
 # --------------------------------------------------
-# 4. Interface de Cabeçalho (Dados do Cliente e Exportação)
+# 4. Interface Superior (Dados, Totais e Botões)
 # --------------------------------------------------
-col_log, col_info, col_exp = st.columns([1, 2, 1.2])
+col_log, col_info, col_exp = st.columns([1, 2, 1.5])
 
 with col_log:
     if os.path.exists(LOGO_PATH):
@@ -80,90 +77,115 @@ with col_info:
     res["morada"] = st.text_input("Morada", res["morada"])
 
 with col_exp:
-    st.markdown("### 📄 Exportação")
+    st.markdown("### 📄 Exportação e Total")
     iva_p = st.selectbox("IVA (%)", [0, 6, 13, 23], index=3)
     
-    # Calcular Totais
+    # Cálculo rigoroso dos itens selecionados
     df_finais = res["dados"][res["dados"]["Quantidade"] > 0].copy()
+    
     if not df_finais.empty:
-        df_finais["Total"] = df_finais["Quantidade"] * df_finais["Preço Unitário"]
-        subtotal = df_finais["Total"].sum()
-        total_final = subtotal * (1 + iva_p/100)
+        df_finais["Total_Linha"] = df_finais["Quantidade"] * df_finais["Preço Unitário"]
+        subtotal = df_finais["Total_Linha"].sum()
+        valor_iva = subtotal * (iva_p / 100)
+        total_final = subtotal + valor_iva
         
-        st.markdown(f"**Subtotal:** {subtotal:.2f} €")
-        st.markdown(f"**Total c/ IVA:** {total_final:.2f} €")
+        st.markdown(f"**Subtotal:** {subtotal:,.2f} €")
+        st.markdown(f"#### **TOTAL COM IVA: {total_final:,.2f} €**")
         
-        # Botão PDF (Simplificado)
-        if st.button("Gerar Orçamento PDF"):
-            st.success("PDF pronto para download (Implementar função doc.build)")
+        c_pdf, c_xls = st.columns(2)
+        
+        # --- GERAÇÃO DE PDF ---
+        with c_pdf:
+            pdf_buffer = io.BytesIO()
+            doc = SimpleDocTemplate(pdf_buffer, pagesize=A4)
+            styles = getSampleStyleSheet()
+            elements = []
+            
+            # Cabeçalho PDF
+            title_st = ParagraphStyle('T', parent=styles['Title'], alignment=TA_CENTER)
+            elements.append(Paragraph(f"ORÇAMENTO: {res['cliente']}", title_st))
+            elements.append(Paragraph(f"Morada: {res['morada']} | Tel: {res['telefone']}", styles['Normal']))
+            elements.append(Spacer(1, 20))
+            
+            # Tabela PDF
+            data_pdf = [["Descrição", "Un", "Qtd", "Preço", "Total"]]
+            for _, r in df_finais.iterrows():
+                data_pdf.append([r["DESCRIÇÃO"][:50], r["UNID"], f"{r['Quantidade']}", f"{r['Preço Unitário']:.2f}€", f"{r['Total_Linha']:.2f}€"])
+            data_pdf.append(["", "", "", "TOTAL:", f"{total_final:,.2f}€"])
+            
+            table = Table(data_pdf, colWidths=[240, 30, 40, 70, 70])
+            table.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.lightgrey), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)]))
+            elements.append(table)
+            doc.build(elements)
+            st.download_button("⬇️ Baixar PDF", pdf_buffer.getvalue(), f"Orcamento_{res['cliente']}.pdf", "application/pdf")
+            
+        # --- GERAÇÃO DE EXCEL ---
+        with c_xls:
+            output_ex = io.BytesIO()
+            with pd.ExcelWriter(output_ex, engine='xlsxwriter') as writer:
+                df_finais.to_excel(writer, index=False, sheet_name='Itens')
+                pd.DataFrame([{"Subtotal": subtotal, "IVA": valor_iva, "Total": total_final}]).to_excel(writer, index=False, sheet_name='Resumo')
+            st.download_button("⬇️ Baixar Excel", output_ex.getvalue(), f"Orcamento_{res['cliente']}.xlsx")
     else:
-        st.caption("Adicione itens na pesquisa para exportar.")
+        st.warning("Adicione quantidades para ver o total.")
 
 # --------------------------------------------------
-# 5. Pesquisa de Artigos
+# 5. Sidebar (Backup e Novo Orçamento)
+# --------------------------------------------------
+with st.sidebar:
+    st.header("💾 Backup Local")
+    st.download_button("📥 Guardar Backup", pickle.dumps(st.session_state["lista_orcamentos"]), f"backup_{date.today()}.pkl")
+    arq = st.file_uploader("📂 Restaurar Backup", type=["pkl"])
+    if arq:
+        st.session_state["lista_orcamentos"] = pickle.loads(arq.read())
+        st.rerun()
+    st.divider()
+    if st.button("➕ Novo Orçamento"):
+        novo = f"Orçamento {len(st.session_state['lista_orcamentos']) + 1}"
+        st.session_state["lista_orcamentos"][novo] = {
+            "cliente": "", "morada": "", "telefone": "", "obra": "", "data_visita": date.today(), "notas": "", "dados": carregar_base_limpa()
+        }
+        st.session_state["orc_atual"] = novo
+        st.rerun()
+
+# --------------------------------------------------
+# 6. Pesquisa e Itens Apurados
 # --------------------------------------------------
 st.divider()
-st.subheader("🔍 1. Pesquisar Artigos")
+st.subheader("🔍 1. Pesquisar e Adicionar Artigos")
 pesquisa = st.text_input("Filtrar por nome ou código...")
 
-# Mostrar itens que não estão na lista de apurados
 mask = res["dados"]["DESCRIÇÃO"].str.contains(pesquisa, case=False, na=False)
 df_search = res["dados"][mask & (res["dados"]["Quantidade"] == 0)]
 
 st.data_editor(
     df_search,
     column_config={
-        "CÓDIGO": st.column_config.TextColumn("Cód", width="small", disabled=True),
-        "DESCRIÇÃO": st.column_config.TextColumn("Descrição", width="large", disabled=True),
-        "UNID": st.column_config.TextColumn("UN", width="small", disabled=True),
-        "Preço Unitário": st.column_config.NumberColumn("Preço Base (€)", format="%.2f", disabled=True),
-        "Quantidade": st.column_config.NumberColumn("Adicionar Qnt", min_value=0.0)
+        "CÓDIGO": None, 
+        "Preço Unitário": st.column_config.NumberColumn("Preço (€)", format="%.2f", disabled=True),
+        "Quantidade": st.column_config.NumberColumn("Qtd", min_value=0.0)
     },
     hide_index=True, use_container_width=True,
     key=f"search_{st.session_state['orc_atual']}",
     on_change=sincronizar_dados, args=(f"search_{st.session_state['orc_atual']}",)
 )
 
-# --------------------------------------------------
-# 6. Itens Apurados (Com eliminação de linha)
-# --------------------------------------------------
 st.markdown("---")
 st.subheader("📝 2. Itens Apurados (Lista Final)")
 
 df_apurados = res["dados"][res["dados"]["Quantidade"] > 0]
 
 if not df_apurados.empty:
-    st.info("💡 **Para eliminar uma linha:** Selecione-a na margem esquerda e prima a tecla **Delete** no teclado ou utilize o ícone de lixo.")
-    
     st.data_editor(
         df_apurados,
         column_config={
             "DESCRIÇÃO": st.column_config.TextColumn("Artigo", width="large", disabled=True),
-            "UNID": st.column_config.TextColumn("UM", width="small", disabled=True),
             "Preço Unitário": st.column_config.NumberColumn("V. Unit (€)", format="%.2f"),
             "Quantidade": st.column_config.NumberColumn("Qnt", min_value=0.0)
         },
-        hide_index=True, 
-        use_container_width=True,
-        num_rows="dynamic",  # Ativa a funcionalidade de adicionar/remover linhas
+        hide_index=True, use_container_width=True,
+        num_rows="dynamic",
         key=f"edit_{st.session_state['orc_atual']}",
         on_change=sincronizar_dados, args=(f"edit_{st.session_state['orc_atual']}",)
     )
-    
-    # Notas adicionais
-    res["notas"] = st.text_area("Notas / Observações do Orçamento", res["notas"])
-else:
-    st.write("Nenhum item selecionado. Use a barra de pesquisa acima.")
-
-# --------------------------------------------------
-# 7. Sidebar (Gestão de Ficheiros)
-# --------------------------------------------------
-with st.sidebar:
-    st.title("Configurações")
-    if st.button("🗑️ Limpar Tudo"):
-        st.session_state.clear()
-        st.rerun()
-    
-    st.divider()
-    st.markdown("### Backup Local")
-    st.download_button("💾 Guardar Progresso", pickle.dumps(st.session_state["lista_orcamentos"]), "backup.pkl")
+    res["notas"] = st.text_area("Notas / Observações", res["notas"])
