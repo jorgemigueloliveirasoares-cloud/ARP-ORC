@@ -158,4 +158,37 @@ st.data_editor(
     df_pesquisa,
     column_config={
         "Preço Unitário": st.column_config.NumberColumn("Preço (€)", format="%.2f", disabled=True),
-        "Quantidade": st.column_config.NumberColumn("Qtd a
+        "Quantidade": st.column_config.NumberColumn("Qtd a Adicionar", min_value=0.0, step=0.1)
+    },
+    hide_index=True, use_container_width=True,
+    key=f"editor_{st.session_state['orc_atual']}",
+    on_change=salvar_edicoes
+)
+
+# --------------------------------------------------
+# 7. Tabela de Itens Apurados (Fundo)
+# --------------------------------------------------
+st.markdown("---")
+st.subheader("📝 Itens Selecionados (Apurados)")
+
+if not itens_finais.empty:
+    # Preparação da visualização conforme imagem do usuário
+    df_visual = itens_finais.copy()
+    df_visual["Valor SI"] = (df_visual["Quantidade"] * df_visual["Preço Unitário"]).map("{:.2f} €".format)
+    
+    # Renomear colunas para o estilo da imagem
+    df_visual = df_visual.rename(columns={
+        "DESCRIÇÃO": "Artigo",
+        "UNID": "UM",
+        "Quantidade": "Qnt",
+        "Preço Unitário": "V Unit"
+    })
+    
+    # Exibição estática (apenas leitura) dos itens já escolhidos
+    st.table(df_visual[["Artigo", "Qnt", "UM", "V Unit", "Valor SI"]])
+    
+    st.markdown(f"<div class='main-total'>Total Apurado: {subtotal:,.2f} €</div>", unsafe_allow_html=True)
+    
+    res["notas"] = st.text_area("Notas / Condições do Orçamento", res["notas"])
+else:
+    st.info("A sua lista de apurados está vazia. Utilize a pesquisa acima para adicionar itens.")
