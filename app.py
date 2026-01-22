@@ -77,26 +77,39 @@ with tab1:
     if termo:
         base = carregar_base()
         res = base[(base["DESCRIÇÃO"].str.contains(termo, case=False)) | (base["CÓDIGO"].str.contains(termo, case=False))].head(10)
+        
         for i, row in res.iterrows():
             c1, c2, c3, c4, c5 = st.columns([1, 4, 1, 1, 0.5])
             c1.write(row["CÓDIGO"])
             c2.write(row["DESCRIÇÃO"])
             c3.write(f"{row['Preço Unitário']:.2f}€")
-            qtd_in = c4.text_input("Qtd", key=f"q_{row['CÓDIGO']}", label_visibility="collapsed")
+            
+            # Mudança aqui: usamos text_input mas validamos com cuidado
+            qtd_in = c4.text_input("Qtd", key=f"q_{row['CÓDIGO']}", label_visibility="collapsed", placeholder="0")
+            
             if c5.button("➕", key=f"b_{row['CÓDIGO']}"):
-                if qtd_in:
+                # Remove espaços e troca vírgula por ponto para conversão
+                qtd_limpa = qtd_in.replace(',', '.').strip()
+                
+                if not qtd_limpa:
+                    st.error("Por favor, insira uma quantidade.")
+                else:
                     try:
-                        v = float(qtd_in.replace(',', '.'))
-                        novo = pd.DataFrame([{"CÓDIGO": row["CÓDIGO"], "Artigo": row["DESCRIÇÃO"], "UNID": row["UNID"], "Preço Unitário": row["Preço Unitário"], "Quantidade": v}])
-                        st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
-                        st.rerun()
-                    except: st.error("Qtd inválida")
+                        v = float(qtd_limpa)
+                        if v > 0:
+                            novo = pd.DataFrame([{"CÓDIGO": row["CÓDIGO"], "Artigo": row["DESCRIÇÃO"], "UNID": row["UNID"], "Preço Unitário": row["Preço Unitário"], "Quantidade": v}])
+                            st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
+                            st.rerun()
+                        else:
+                            st.error("A quantidade deve ser maior que zero.")
+                    except ValueError:
+                        st.error(f"'{qtd_in}' não é um número válido.")
 
 with tab2:
     m1, m2, m3, m4 = st.columns([3, 1, 1, 1])
     m_desc = m1.text_input("Descrição Manual")
-    m_prec = m2.number_input("Preço €", min_value=0.0)
-    m_qtd = m3.number_input("Qtd", min_value=0.0)
+    m_prec = m2.number_input("Preço €", min_value=0.0, step=0.01, format="%.2f")
+    m_qtd = m3.number_input("Qtd", min_value=0.0, step=1.0)
     if m4.button("Adicionar"):
         if m_desc and m_qtd > 0:
             nm = pd.DataFrame([{"CÓDIGO": "EXTRA", "Artigo": m_desc, "UNID": "un", "Preço Unitário": m_prec, "Quantidade": m_qtd}])
@@ -108,8 +121,12 @@ st.divider()
 if not st.session_state.itens_orcamento.empty:
     df_final = st.session_state.itens_orcamento.copy()
     df_final["Subtotal"] = df_final["Quantidade"] * df_final["Preço Unitário"]
-    st.data_editor(df_final, use_container_width=True, hide_index=True)
-    total_val = df_final["Subtotal"].sum()
+    
+    # Permitir edição direta na tabela
+    df_editado = st.data_editor(df_final, use_container_width=True, hide_index=True)
+    st.session_state.itens_orcamento = df_editado[["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"]]
+    
+    total_val = df_editado["Subtotal"].sum()
     st.write(f"### Total: {total_val:,.2f}€")
 
     def criar_pdf(df, total):
@@ -117,14 +134,13 @@ if not st.session_state.itens_orcamento.empty:
         doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20, bottomMargin=20)
         sty = getSampleStyleSheet()
         
-        # Estilo customizado para o texto dentro da tabela (Word Wrap)
+        # Estilo para Word Wrap
         estilo_tabela = sty['Normal']
         estilo_tabela.fontSize = 9
-        estilo_tabela.leading = 11  # Espaçamento entre linhas dentro da célula
+        estilo_tabela.leading = 11 
         
         elems = []
         
-        # Logo
         if os.path.exists("logo.png"):
             img = RLImage("logo.png", width=1.5*inch, height=0.8*inch)
             img.hAlign = 'LEFT'
@@ -133,31 +149,24 @@ if not st.session_state.itens_orcamento.empty:
         elems.append(Paragraph(f"ORÇAMENTO: {n_orc}", sty['Title']))
         elems.append(Spacer(1, 10))
         
-        # Dados do Cliente
         cli_info = f"<b>Cliente:</b> {nome_cli}<br/><b>Morada:</b> {morada_cli}<br/><b>Tel:</b> {tel_cli}<br/><b>Email:</b> {email_cli}"
         elems.append(Paragraph(cli_info, sty['Normal']))
         elems.append(Spacer(1, 20))
         
-        # Cabeçalho da Tabela
         data = [["Artigo / Descrição", "Qtd", "Unid", "Preço Unit.", "Total"]]
         
-        # Linhas da Tabela
         for _, r in df.iterrows():
-            # A alteração principal: envolver o Artigo num Paragraph
-            artigo_formatado = Paragraph(r['Artigo'], estilo_tabela)
-            
+            artigo_formatado = Paragraph(str(r['Artigo']), estilo_tabela)
             data.append([
                 artigo_formatado, 
                 r['Quantidade'], 
                 r['UNID'], 
                 f"{r['Preço Unitário']:.2f}€", 
-                f"{r['Subtotal']:.2f}€"
+                f"{(r['Quantidade'] * r['Preço Unitário']):.2f}€"
             ])
         
-        # Linha do Total
         data.append(["", "", "", "TOTAL:", f"{total:,.2f}€"])
         
-        # Configuração das larguras das colunas (total ~500 pontos)
         t = Table(data, colWidths=[280, 40, 40, 70, 70])
         t.setStyle(TableStyle([
             ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
@@ -165,10 +174,8 @@ if not st.session_state.itens_orcamento.empty:
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
             ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
             ('BACKGROUND', (0,-1), (-1,-1), colors.lightgrey),
-            ('ALIGN', (1,0), (-1,-1), 'CENTER'), # Centraliza Qtd, Unid, etc
-            ('VALIGN', (0,0), (-1,-1), 'TOP'),    # ALINHAMENTO VERTICAL AO TOPO
-            ('LEFTPADDING', (0,0), (-1,-1), 5),
-            ('RIGHTPADDING', (0,0), (-1,-1), 5),
+            ('ALIGN', (1,0), (-1,-1), 'CENTER'),
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
         ]))
         elems.append(t)
         
@@ -181,13 +188,11 @@ if not st.session_state.itens_orcamento.empty:
 
     c_pdf, c_xls, c_limp = st.columns(3)
     
-    # Botão PDF
-    c_pdf.download_button("📥 Baixar PDF", data=criar_pdf(df_final, total_val), file_name=f"{n_orc}.pdf", use_container_width=True)
+    c_pdf.download_button("📥 Baixar PDF", data=criar_pdf(df_editado, total_val), file_name=f"{n_orc}.pdf", use_container_width=True)
     
-    # Botão Excel
     buf_x = io.BytesIO()
     with pd.ExcelWriter(buf_x, engine='xlsxwriter') as wr:
-        df_final.to_excel(wr, index=False)
+        df_editado.to_excel(wr, index=False)
     c_xls.download_button("📊 Baixar Excel", data=buf_x.getvalue(), file_name=f"{n_orc}.xlsx", use_container_width=True)
 
     if c_limp.button("🗑️ Limpar Tudo", use_container_width=True):
