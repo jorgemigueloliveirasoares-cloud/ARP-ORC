@@ -11,30 +11,40 @@ import os
 import pickle
 
 # --------------------------------------------------
-# 1. Configuração e Estética
+# 1. Configuração Inicial e Estética
 # --------------------------------------------------
-st.set_page_config(page_title="Orçamentador Pro", layout="wide")
+st.set_page_config(page_title="Gestor de Orçamentos", layout="wide")
 
 LOGO_PATH = "logo.png" 
 EXCEL_PATH = "Cópia de Preços Tabela atual.xlsx"
 
+# Estilo CSS para aproximar a tabela visualmente da imagem enviada
+st.markdown("""
+    <style>
+    .stTable { font-size: 12px !important; }
+    .main-total { font-size: 24px; font-weight: bold; color: #2e7d32; }
+    </style>
+    """, unsafe_allow_html=True)
+
 # --------------------------------------------------
-# 2. Funções de Suporte e Salvamento
+# 2. Funções de Suporte
 # --------------------------------------------------
 def carregar_base_limpa():
     if os.path.exists(EXCEL_PATH):
         try:
             df = pd.read_excel(EXCEL_PATH)
+            # Ajuste de colunas conforme o seu ficheiro Excel
             colunas = ["CÓDIGO", "DESCRIÇÃO", "UNID", "VALORES ATUAIS JANEIRO 2025"]
             df = df[colunas].dropna(subset=["DESCRIÇÃO"])
             df.rename(columns={"VALORES ATUAIS JANEIRO 2025": "Preço Unitário"}, inplace=True)
             df["Quantidade"] = 0.0
             return df
         except:
-            pass
+            st.error("Erro ao ler o Excel. Verifique os nomes das colunas.")
     return pd.DataFrame(columns=["CÓDIGO", "DESCRIÇÃO", "UNID", "Preço Unitário", "Quantidade"])
 
 def salvar_edicoes():
+    """Grava as quantidades no estado global assim que a célula é editada"""
     key = f"editor_{st.session_state['orc_atual']}"
     if key in st.session_state:
         edicoes = st.session_state[key]
@@ -43,7 +53,7 @@ def salvar_edicoes():
                 st.session_state["lista_orcamentos"][st.session_state["orc_atual"]]["dados"].at[row_idx, col] = val
 
 # --------------------------------------------------
-# 3. Gestão de Estado (Sessão)
+# 3. Inicialização do Estado (Session State)
 # --------------------------------------------------
 if "lista_orcamentos" not in st.session_state:
     st.session_state["lista_orcamentos"] = {
@@ -55,94 +65,97 @@ if "lista_orcamentos" not in st.session_state:
     st.session_state["orc_atual"] = "Orçamento 1"
 
 # --------------------------------------------------
-# 4. Interface Superior (Logo e Botões de Ação)
+# 4. Interface Superior (Logo, Dados e Botões de Exportação)
 # --------------------------------------------------
-col_logo, col_acoes = st.columns([1, 2])
+col_log, col_info, col_exp = st.columns([1, 2, 1.2])
 
-with col_logo:
+res = st.session_state["lista_orcamentos"][st.session_state["orc_atual"]]
+
+with col_log:
     if os.path.exists(LOGO_PATH):
-        st.image(LOGO_PATH, width=200)
+        st.image(LOGO_PATH, width=180)
 
-with col_acoes:
-    st.write("### 📄 Exportar e Ações")
-    c_pdf, c_xls, c_clear = st.columns(3)
+with col_info:
+    st.markdown(f"### 📋 {st.session_state['orc_atual']}")
+    c1, c2 = st.columns(2)
+    res["cliente"] = c1.text_input("Cliente", res["cliente"])
+    res["telefone"] = c2.text_input("Telefone", res["telefone"])
+    res["morada"] = st.text_input("Morada do Cliente", res["morada"])
+
+with col_exp:
+    st.markdown("### 📄 Acções")
+    iva_percent = st.selectbox("IVA (%)", [0, 6, 13, 23], index=3)
     
-    # Preparar dados para exportação
-    res = st.session_state["lista_orcamentos"][st.session_state["orc_atual"]]
+    # Cálculo de Totais para Exportação
     itens_finais = res["dados"][res["dados"]["Quantidade"] > 0].copy()
     
     if not itens_finais.empty:
         itens_finais["Total"] = itens_finais["Quantidade"] * itens_finais["Preço Unitário"]
-        total_geral = itens_finais["Total"].sum() # Simplificado para exemplo
+        subtotal = itens_finais["Total"].sum()
+        total_com_iva = subtotal * (1 + iva_percent/100)
 
-        # Botão PDF
-        with c_pdf:
-            pdf_buffer = io.BytesIO()
-            # ... (Lógica do PDF igual à anterior)
-            st.download_button("⬇️ Gerar PDF", b"pdf_data", f"Orcamento_{res['cliente']}.pdf")
-            
-        # Botão Excel
-        with c_xls:
-            output_ex = io.BytesIO()
-            # ... (Lógica do Excel igual à anterior)
-            st.download_button("⬇️ Gerar Excel", b"excel_data", f"Orcamento_{res['cliente']}.xlsx")
+        c_pdf, c_xls = st.columns(2)
+        
+        # Gerar PDF
+        pdf_buffer = io.BytesIO()
+        doc = SimpleDocTemplate(pdf_buffer, pagesize=A4)
+        styles = getSampleStyleSheet()
+        elements = []
+        # (Lógica simplificada do PDF - use a lógica completa dos passos anteriores aqui)
+        
+        c_pdf.download_button("⬇️ Baixar PDF", b"data", f"Orcamento_{res['cliente']}.pdf")
+        
+        # Gerar Excel
+        output_ex = io.BytesIO()
+        with pd.ExcelWriter(output_ex, engine='xlsxwriter') as writer:
+            itens_finais.to_excel(writer, index=False, sheet_name='Orçamento')
+        c_xls.download_button("⬇️ Baixar Excel", output_ex.getvalue(), f"Orcamento_{res['cliente']}.xlsx")
     else:
-        st.info("Adicione itens para exportar")
+        st.caption("Adicione itens para activar exportação.")
 
 # --------------------------------------------------
-# 5. Sidebar e Dados do Cliente
+# 5. Sidebar: Backup e Múltiplos Orçamentos
 # --------------------------------------------------
 with st.sidebar:
     st.header("💾 Backup")
-    # ... (Botões de backup iguais)
+    # Backup (pkl) para não perder rascunhos ao fechar o browser
+    st.download_button("📥 Guardar Backup", pickle.dumps(st.session_state["lista_orcamentos"]), f"backup_{date.today()}.pkl")
+    
+    arq = st.file_uploader("📂 Restaurar Backup", type=["pkl"])
+    if arq:
+        st.session_state["lista_orcamentos"] = pickle.loads(arq.read())
+        st.rerun()
+
     st.divider()
-    st.header("📋 Dados do Cliente")
-    res["cliente"] = st.text_input("Cliente", res["cliente"])
-    res["morada"] = st.text_area("Morada", res["morada"])
-    res["telefone"] = st.text_input("Telefone", res["telefone"])
-    res["obra"] = st.text_input("Obra", res["obra"])
-    res["data_visita"] = st.date_input("Data Visita", res["data_visita"])
+    st.header("📂 Lista de Trabalhos")
+    opcoes = list(st.session_state["lista_orcamentos"].keys())
+    escolha = st.selectbox("Mudar para:", opcoes, index=opcoes.index(st.session_state["orc_atual"]))
+    if escolha != st.session_state["orc_atual"]:
+        st.session_state["orc_atual"] = escolha
+        st.rerun()
+    
+    if st.button("➕ Criar Novo Orçamento"):
+        novo = f"Orçamento {len(st.session_state['lista_orcamentos']) + 1}"
+        st.session_state["lista_orcamentos"][novo] = {
+            "cliente": "", "morada": "", "telefone": "", "obra": "", 
+            "data_visita": date.today(), "notas": "", "dados": carregar_base_limpa()
+        }
+        st.session_state["orc_atual"] = novo
+        st.rerun()
 
 # --------------------------------------------------
-# 6. Seleção de Artigos (Meio)
+# 6. Zona de Pesquisa e Seleção (Meio)
 # --------------------------------------------------
 st.divider()
-st.subheader("🔍 Seleção de Artigos")
-pesquisa = st.text_input("Pesquise pelo nome ou código do artigo...")
-dados_atuais = res["dados"]
-mask = dados_atuais["DESCRIÇÃO"].str.contains(pesquisa, case=False, na=False)
+st.subheader("🔍 Pesquisa de Artigos")
+pesquisa = st.text_input("Digite o nome ou código para encontrar na base de dados...")
 
-# Tabela de pesquisa (só mostra o que não tem quantidade para não duplicar)
-df_selecao = dados_atuais[mask & (dados_atuais["Quantidade"] == 0)]
+# Filtra o que pesquisaste mas remove o que já está nos apurados para não confundir
+mask = res["dados"]["DESCRIÇÃO"].str.contains(pesquisa, case=False, na=False)
+df_pesquisa = res["dados"][mask & (res["dados"]["Quantidade"] == 0)]
 
 st.data_editor(
-    df_selecao,
-    column_config={"Quantidade": st.column_config.NumberColumn("Add Qtd", min_value=0.0)},
-    hide_index=True, use_container_width=True,
-    key=f"editor_{st.session_state['orc_atual']}",
-    on_change=salvar_edicoes
-)
-
-# --------------------------------------------------
-# 7. Itens Apurados (Fundo - Estilo imagem anexada)
-# --------------------------------------------------
-st.write("")
-st.markdown("### 📋 Itens no Orçamento (Apurados)")
-
-if not itens_finais.empty:
-    # Formatação para parecer com a imagem anexada
-    df_apurado = itens_finais.copy()
-    df_apurado["Apurado (€)"] = df_apurado["Total"].map("{:.2f} €".format)
-    df_apurado = df_apurado.rename(columns={
-        "DESCRIÇÃO": "Artigo",
-        "UNID": "UM",
-        "Quantidade": "Qnt",
-        "Preço Unitário": "V Unit"
-    })
-    
-    # Exibe a tabela de itens já escolhidos
-    st.table(df_apurado[["Artigo", "Qnt", "UM", "V Unit", "Apurado (€)"]])
-    
-    st.success(f"**Total do Orçamento: {itens_finais['Total'].sum():,.2f} €**")
-else:
-    st.warning("Nenhum item selecionado ainda.")
+    df_pesquisa,
+    column_config={
+        "Preço Unitário": st.column_config.NumberColumn("Preço (€)", format="%.2f", disabled=True),
+        "Quantidade": st.column_config.NumberColumn("Qtd a
