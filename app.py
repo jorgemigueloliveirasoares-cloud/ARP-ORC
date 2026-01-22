@@ -40,7 +40,7 @@ with col_log:
     if os.path.exists("logo.png"): st.image("logo.png", width=180)
 
 with col_cli:
-    st.subheader("📋 Dados do Cliente")
+    st.subheader("📋 Dados do Cliente- O Alexandre é gay")
     nome_cli = st.text_input("Nome do Cliente", key="nome_cli")
     morada_cli = st.text_input("Morada", key="morada_cli")
     c1, c2 = st.columns(2)
@@ -171,3 +171,4 @@ if not st.session_state.itens_orcamento.empty:
     if c_limp.button("🗑️ Limpar Tudo", use_container_width=True):
         st.session_state.itens_orcamento = pd.DataFrame(columns=["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"])
         st.rerun()
+
