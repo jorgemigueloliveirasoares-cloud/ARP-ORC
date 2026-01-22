@@ -22,11 +22,12 @@ def carregar_base():
         try:
             df = pd.read_excel(caminho)
             df.columns = [str(c).strip() for c in df.columns]
-            # Ajuste o nome da coluna conforme a sua tabela Excel
             col_preco = "VALORES ATUAIS JANEIRO 2025" 
             df = df[["CÓDIGO", "DESCRIÇÃO", "UNID", col_preco]].dropna(subset=["CÓDIGO"])
             df.rename(columns={col_preco: "Preço Unitário"}, inplace=True)
             df["CÓDIGO"] = df["CÓDIGO"].astype(str).str.strip()
+            # Garantir que o preço unitário é numérico
+            df["Preço Unitário"] = pd.to_numeric(df["Preço Unitário"], errors='coerce').fillna(0.0)
             return df
         except: pass
     return pd.DataFrame(columns=["CÓDIGO", "DESCRIÇÃO", "UNID", "Preço Unitário"])
@@ -84,32 +85,29 @@ with tab1:
             c2.write(row["DESCRIÇÃO"])
             c3.write(f"{row['Preço Unitário']:.2f}€")
             
-            # Mudança aqui: usamos text_input mas validamos com cuidado
             qtd_in = c4.text_input("Qtd", key=f"q_{row['CÓDIGO']}", label_visibility="collapsed", placeholder="0")
             
             if c5.button("➕", key=f"b_{row['CÓDIGO']}"):
-                # Remove espaços e troca vírgula por ponto para conversão
                 qtd_limpa = qtd_in.replace(',', '.').strip()
-                
                 if not qtd_limpa:
-                    st.error("Por favor, insira uma quantidade.")
+                    st.error("Insira a quantidade.")
                 else:
                     try:
                         v = float(qtd_limpa)
                         if v > 0:
-                            novo = pd.DataFrame([{"CÓDIGO": row["CÓDIGO"], "Artigo": row["DESCRIÇÃO"], "UNID": row["UNID"], "Preço Unitário": row["Preço Unitário"], "Quantidade": v}])
+                            novo = pd.DataFrame([{"CÓDIGO": row["CÓDIGO"], "Artigo": row["DESCRIÇÃO"], "UNID": row["UNID"], "Preço Unitário": float(row["Preço Unitário"]), "Quantidade": v}])
                             st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
                             st.rerun()
                         else:
-                            st.error("A quantidade deve ser maior que zero.")
+                            st.error("Qtd > 0")
                     except ValueError:
-                        st.error(f"'{qtd_in}' não é um número válido.")
+                        st.error("Número inválido")
 
 with tab2:
     m1, m2, m3, m4 = st.columns([3, 1, 1, 1])
     m_desc = m1.text_input("Descrição Manual")
     m_prec = m2.number_input("Preço €", min_value=0.0, step=0.01, format="%.2f")
-    m_qtd = m3.number_input("Qtd", min_value=0.0, step=1.0)
+    m_qtd = m3.number_input("Qtd", min_value=0.0, step=0.01, format="%.2f")
     if m4.button("Adicionar"):
         if m_desc and m_qtd > 0:
             nm = pd.DataFrame([{"CÓDIGO": "EXTRA", "Artigo": m_desc, "UNID": "un", "Preço Unitário": m_prec, "Quantidade": m_qtd}])
@@ -120,10 +118,29 @@ with tab2:
 st.divider()
 if not st.session_state.itens_orcamento.empty:
     df_final = st.session_state.itens_orcamento.copy()
+    
+    # Garantir que as colunas são numéricas antes do cálculo
+    df_final["Quantidade"] = pd.to_numeric(df_final["Quantidade"], errors='coerce').fillna(0.0)
+    df_final["Preço Unitário"] = pd.to_numeric(df_final["Preço Unitário"], errors='coerce').fillna(0.0)
     df_final["Subtotal"] = df_final["Quantidade"] * df_final["Preço Unitário"]
     
-    # Permitir edição direta na tabela
-    df_editado = st.data_editor(df_final, use_container_width=True, hide_index=True)
+    # Configuração de exibição da tabela no Streamlit com símbolos e 2 casas decimais
+    df_exibicao = df_final.copy()
+    
+    # Aplicar formatação visual para a tabela do Streamlit
+    st.markdown("### 📋 Itens do Orçamento")
+    df_editado = st.data_editor(
+        df_final,
+        column_config={
+            "Preço Unitário": st.column_config.NumberColumn("Preço Unitário", format="%.2f €"),
+            "Quantidade": st.column_config.NumberColumn("Quantidade", format="%.2f"),
+            "Subtotal": st.column_config.NumberColumn("Subtotal", format="%.2f €"),
+        },
+        use_container_width=True,
+        hide_index=True
+    )
+    
+    # Atualizar o estado com as edições feitas na tabela
     st.session_state.itens_orcamento = df_editado[["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"]]
     
     total_val = df_editado["Subtotal"].sum()
@@ -134,7 +151,6 @@ if not st.session_state.itens_orcamento.empty:
         doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20, bottomMargin=20)
         sty = getSampleStyleSheet()
         
-        # Estilo para Word Wrap
         estilo_tabela = sty['Normal']
         estilo_tabela.fontSize = 9
         estilo_tabela.leading = 11 
@@ -153,21 +169,23 @@ if not st.session_state.itens_orcamento.empty:
         elems.append(Paragraph(cli_info, sty['Normal']))
         elems.append(Spacer(1, 20))
         
+        # Cabeçalho da Tabela
         data = [["Artigo / Descrição", "Qtd", "Unid", "Preço Unit.", "Total"]]
         
         for _, r in df.iterrows():
             artigo_formatado = Paragraph(str(r['Artigo']), estilo_tabela)
+            # Formatação de 2 casas decimais e símbolo de Euro para o PDF
             data.append([
                 artigo_formatado, 
-                r['Quantidade'], 
+                f"{float(r['Quantidade']):.2f}", 
                 r['UNID'], 
-                f"{r['Preço Unitário']:.2f}€", 
-                f"{(r['Quantidade'] * r['Preço Unitário']):.2f}€"
+                f"{float(r['Preço Unitário']):.2f}€", 
+                f"{(float(r['Quantidade']) * float(r['Preço Unitário'])):.2f}€"
             ])
         
         data.append(["", "", "", "TOTAL:", f"{total:,.2f}€"])
         
-        t = Table(data, colWidths=[280, 40, 40, 70, 70])
+        t = Table(data, colWidths=[280, 45, 45, 65, 65])
         t.setStyle(TableStyle([
             ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
             ('BACKGROUND', (0,0), (-1,0), colors.whitesmoke),
@@ -175,6 +193,7 @@ if not st.session_state.itens_orcamento.empty:
             ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
             ('BACKGROUND', (0,-1), (-1,-1), colors.lightgrey),
             ('ALIGN', (1,0), (-1,-1), 'CENTER'),
+            ('ALIGN', (3,0), (4,-1), 'RIGHT'), # Preços alinhados à direita
             ('VALIGN', (0,0), (-1,-1), 'TOP'),
         ]))
         elems.append(t)
@@ -188,6 +207,7 @@ if not st.session_state.itens_orcamento.empty:
 
     c_pdf, c_xls, c_limp = st.columns(3)
     
+    # PDF utiliza o dataframe editado
     c_pdf.download_button("📥 Baixar PDF", data=criar_pdf(df_editado, total_val), file_name=f"{n_orc}.pdf", use_container_width=True)
     
     buf_x = io.BytesIO()
