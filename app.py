@@ -1,119 +1,123 @@
 import streamlit as st
 import pandas as pd
 import os
-import io
 
-# 1. CONFIGURAÇÃO INICIAL
+# 1. CONFIGURAÇÃO
 st.set_page_config(page_title="Gestor de Orçamentos", layout="wide")
 
-# 2. CARREGAMENTO SEGURO DA BASE DE DADOS
-@st.cache_data
+# 2. CARREGAMENTO E LIMPEZA DA BASE
 def carregar_base():
-    if os.path.exists("Cópia de Preços Tabela atual.xlsx"):
+    caminho = "Cópia de Preços Tabela atual.xlsx"
+    if os.path.exists(caminho):
         try:
-            df = pd.read_excel("Cópia de Preços Tabela atual.xlsx")
-            df.columns = [c.strip() for c in df.columns]
-            # Mapeamento de colunas conforme os seus ficheiros anteriores
+            df = pd.read_excel(caminho)
+            df.columns = [str(c).strip() for c in df.columns]
+            
+            # Mapeamento dinâmico das colunas
             col_preco = "VALORES ATUAIS JANEIRO 2025"
             df = df[["CÓDIGO", "DESCRIÇÃO", "UNID", col_preco]].dropna(subset=["CÓDIGO"])
             df.rename(columns={col_preco: "Preço Unitário"}, inplace=True)
+            
+            # Limpeza crucial: remover espaços e converter tudo para texto para a pesquisa funcionar
             df["CÓDIGO"] = df["CÓDIGO"].astype(str).str.strip()
+            df["DESCRIÇÃO"] = df["DESCRIÇÃO"].astype(str).str.strip()
+            df["Preço Unitário"] = pd.to_numeric(df["Preço Unitário"], errors='coerce').fillna(0.0)
+            
             return df
         except Exception as e:
-            st.error(f"Erro ao ler Excel: {e}")
-    # Base de dados de recurso (fallback) para teste
-    return pd.DataFrame({
-        "CÓDIGO": ["ARP901-A", "ARP101", "ARP2202"],
-        "DESCRIÇÃO": ["Pintar tinta plástica interior/exterior", "Abrir roços em alvernaria", "Proteção da zona a intervir"],
-        "UNID": ["m2", "ml", "dia"],
-        "Preço Unitário": [10.90, 18.00, 37.80]
-    })
+            st.error(f"Erro ao carregar Excel: {e}")
+    return pd.DataFrame(columns=["CÓDIGO", "DESCRIÇÃO", "UNID", "Preço Unitário"])
 
-# Inicialização do Estado da Sessão
+# Inicialização do Estado
 if "base_dados" not in st.session_state:
     st.session_state.base_dados = carregar_base()
 
 if "itens_orcamento" not in st.session_state:
     st.session_state.itens_orcamento = pd.DataFrame(columns=["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"])
 
-# 3. ÁREA DE PESQUISA (CORRIGIDA)
+# 3. ÁREA DE PESQUISA (MELHORADA)
 st.subheader("🔍 1. Pesquisar e Adicionar")
-pesquisa = st.text_input("Pesquisar por nome ou código:", value="", key="barra_pesquisa")
+# O segredo para a pesquisa não falhar é garantir que o termo de pesquisa é limpo
+termo = st.text_input("Pesquise por nome ou código (ex: picar, lixar, arp...):", key="search_bar").strip()
 
-if pesquisa:
-    # Filtro flexível para evitar que "não apareça nada"
-    mask = (st.session_state.base_dados["DESCRIÇÃO"].str.contains(pesquisa, case=False, na=False)) | \
-           (st.session_state.base_dados["CÓDIGO"].str.contains(pesquisa, case=False, na=False))
+if termo:
+    # Filtro que ignora maiúsculas/minúsculas e lida com valores NA
+    base = st.session_state.base_dados
+    mask = (base["DESCRIÇÃO"].str.contains(termo, case=False, na=False)) | \
+           (base["CÓDIGO"].str.contains(termo, case=False, na=False))
     
-    resultados = st.session_state.base_dados[mask].head(15)
+    resultados = base[mask].head(15)
     
     if not resultados.empty:
-        # Cabeçalho da Lista
-        h1, h2, h3, h4, h5 = st.columns([1, 3, 1, 1, 0.5])
-        h1.caption("**Cód**")
-        h2.caption("**Descrição**")
-        h3.caption("**Preço**")
-        h4.caption("**Qtd**")
-        h5.caption("**Add**")
-        
+        # Layout da lista de resultados
         for i, row in resultados.iterrows():
             with st.container():
-                c1, c2, c3, c4, c5 = st.columns([1, 3, 1, 1, 0.5])
-                c1.write(row["CÓDIGO"])
+                c1, c2, c3, c4, c5 = st.columns([1, 4, 1, 1, 0.5])
+                c1.write(f"**{row['CÓDIGO']}**")
                 c2.write(row["DESCRIÇÃO"])
                 c3.write(f"{row['Preço Unitário']:.2f}€")
                 
-                # Qtd Manual (Text Input)
-                qtd_input = c4.text_input("Qtd", key=f"in_{row['CÓDIGO']}", label_visibility="collapsed")
+                # Input de Qtd sem os botões + / - (apenas manual)
+                qtd_input = c4.text_input("Qtd", key=f"q_in_{row['CÓDIGO']}", label_visibility="collapsed", placeholder="0")
                 
-                if c5.button("➕", key=f"btn_{row['CÓDIGO']}"):
+                if c5.button("➕", key=f"btn_add_{row['CÓDIGO']}"):
                     if qtd_input:
                         try:
-                            # Converte vírgulas em pontos para aceitar decimais
-                            v_qtd = float(qtd_input.replace(',', '.'))
-                            novo = pd.DataFrame([{
-                                "CÓDIGO": row["CÓDIGO"],
-                                "Artigo": row["DESCRIÇÃO"],
-                                "UNID": row["UNID"],
-                                "Preço Unitário": row["Preço Unitário"],
-                                "Quantidade": v_qtd
-                            }])
-                            st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
-                            st.rerun()
+                            val_qtd = float(qtd_input.replace(',', '.'))
+                            if val_qtd > 0:
+                                novo_item = pd.DataFrame([{
+                                    "CÓDIGO": row["CÓDIGO"],
+                                    "Artigo": row["DESCRIÇÃO"],
+                                    "UNID": row["UNID"],
+                                    "Preço Unitário": row["Preço Unitário"],
+                                    "Quantidade": val_qtd
+                                }])
+                                st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo_item], ignore_index=True)
+                                st.rerun()
                         except ValueError:
-                            st.toast("⚠️ Insira um número válido", icon="❌")
+                            st.toast(f"Quantidade inválida para {row['CÓDIGO']}", icon="⚠️")
     else:
         st.warning("Nenhum artigo encontrado com esse termo.")
 
-# 4. ITENS APURADOS (COM CÁLCULO DE TOTAL POR ITEM)
+# 4. ITENS APURADOS (COM COLUNA DE SUBTOTAL)
 st.divider()
 st.subheader("📝 2. Itens Apurados")
 
 if not st.session_state.itens_orcamento.empty:
-    # Preparação para visualização com Total
-    df_view = st.session_state.itens_orcamento.copy()
-    df_view["Total Item (€)"] = df_view["Quantidade"] * df_view["Preço Unitário"]
+    # Preparar DataFrame para o Editor (com cálculo do subtotal)
+    df_apurados = st.session_state.itens_orcamento.copy()
+    df_apurados["Subtotal (€)"] = df_apurados["Quantidade"] * df_apurados["Preço Unitário"]
     
-    # Edição apenas de Preço e Quantidade
+    # Editor de dados
     df_editado = st.data_editor(
-        df_view,
+        df_apurados,
         use_container_width=True,
         hide_index=True,
         column_config={
             "CÓDIGO": st.column_config.TextColumn("Cód", disabled=True),
             "Artigo": st.column_config.TextColumn("Descrição", disabled=True),
+            "UNID": st.column_config.TextColumn("UNID", disabled=True),
             "Preço Unitário": st.column_config.NumberColumn("V. Unit (€)", format="%.2f"),
             "Quantidade": st.column_config.NumberColumn("Qtd", format="%.2f"),
-            "Total Item (€)": st.column_config.NumberColumn("Subtotal", format="%.2f", disabled=True)
-        }
+            "Subtotal (€)": st.column_config.NumberColumn("Subtotal (€)", format="%.2f", disabled=True)
+        },
+        key="editor_apurados"
     )
     
-    col_tot, col_save = st.columns([3, 1])
-    total_geral = df_editado["Total Item (€)"].sum()
-    col_tot.markdown(f"### **Total Geral: {total_geral:,.2f} €**")
+    # Rodapé com Totais
+    c_tot, c_upd = st.columns([4, 1])
+    total_geral = df_editado["Subtotal (€)"].sum()
+    c_tot.markdown(f"### **Total Geral: {total_geral:,.2f} €**")
     
-    if col_save.button("💾 Atualizar Totais"):
+    if c_upd.button("💾 Atualizar Cálculos", use_container_width=True):
+        # Salva apenas as colunas base (o subtotal é recalculado na visualização)
         st.session_state.itens_orcamento = df_editado[["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"]]
         st.rerun()
 else:
-    st.info("Utilize a pesquisa acima para adicionar artigos ao orçamento.")
+    st.info("A lista de orçamento está vazia.")
+
+# Sidebar para limpar
+with st.sidebar:
+    if st.button("🗑️ Limpar Todo o Orçamento"):
+        st.session_state.itens_orcamento = pd.DataFrame(columns=["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"])
+        st.rerun()
