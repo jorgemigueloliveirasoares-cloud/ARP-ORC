@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import os
 import io
-import pickle
 from datetime import date
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
@@ -45,7 +44,7 @@ if "dados_cliente" not in st.session_state:
     st.session_state.dados_cliente = {"nome": "", "tel": "", "morada": "", "iva": 23}
 
 # --------------------------------------------------
-# 3. INTERFACE SUPERIOR (DADOS E RESUMO)
+# 3. INTERFACE SUPERIOR
 # --------------------------------------------------
 col_log, col_info, col_exp = st.columns([1, 2, 1.5])
 
@@ -65,24 +64,21 @@ with col_exp:
     iva = st.selectbox("IVA (%)", [0, 6, 13, 23], index=3)
     
     if not st.session_state.itens_orcamento.empty:
-        # Garantir que os cálculos usam os valores editados
         df_calc = st.session_state.itens_orcamento
-        subtotal = (df_calc["Quantidade"] * df_calc["Preço Unitário"]).sum()
-        total_iva = subtotal * (iva/100)
-        total_final = subtotal + total_iva
+        subtotal = (pd.to_numeric(df_calc["Quantidade"]) * pd.to_numeric(df_calc["Preço Unitário"])).sum()
+        total_final = subtotal * (1 + iva/100)
         st.markdown(f"#### **Total: {total_final:,.2f} €**")
-        st.caption(f"Subtotal: {subtotal:,.2f} € | IVA: {total_iva:,.2f} €")
     else:
         st.info("Adicione itens.")
 
 # --------------------------------------------------
-# 4. PESQUISA E ADIÇÃO MANUAL
+# 4. PESQUISA (QUANTIDADE MANUAL)
 # --------------------------------------------------
 st.divider()
-tab1, tab2 = st.tabs(["🔍 Pesquisar na Tabela", "➕ Adicionar Artigo Extra (Manual)"])
+tab1, tab2 = st.tabs(["🔍 Pesquisar Artigos", "➕ Item Extra"])
 
 with tab1:
-    pesquisa = st.text_input("Digite o termo de pesquisa (picar, pintura, código...):")
+    pesquisa = st.text_input("Pesquisar por nome ou código:")
     if pesquisa:
         mask = (st.session_state.base_dados["DESCRIÇÃO"].str.contains(pesquisa, case=False, na=False)) | \
                (st.session_state.base_dados["CÓDIGO"].str.contains(pesquisa, case=False, na=False))
@@ -92,8 +88,8 @@ with tab1:
             h1, h2, h3, h4, h5 = st.columns([1, 3, 1, 1, 0.5])
             h1.caption("**Cód**")
             h2.caption("**Descrição**")
-            h3.caption("**V. Unit**")
-            h4.caption("**Quantidade**")
+            h3.caption("**Preço**")
+            h4.caption("**Qtd (Manual)**")
             h5.caption("**Add**")
             
             for i, row in resultados.iterrows():
@@ -101,81 +97,67 @@ with tab1:
                     c1, c2, c3, c4, c5 = st.columns([1, 3, 1, 1, 0.5])
                     c1.write(row["CÓDIGO"])
                     c2.write(row["DESCRIÇÃO"])
-                    c3.write(f"{row['Preço Unitário']:.2f} €")
-                    qtd = c4.number_input("Qtd", min_value=0.0, step=1.0, key=f"q_{row['CÓDIGO']}", label_visibility="collapsed")
+                    c3.write(f"{row['Preço Unitário']:.2f}€")
+                    
+                    # Quantidade agora é campo de texto para introdução rápida manual
+                    qtd_manual = c4.text_input("qtd", key=f"q_{row['CÓDIGO']}", label_visibility="collapsed")
+                    
                     if c5.button("➕", key=f"b_{row['CÓDIGO']}"):
-                        if qtd > 0:
-                            novo = pd.DataFrame([{"CÓDIGO": row["CÓDIGO"], "Artigo": row["DESCRIÇÃO"], "UNID": row["UNID"], "Preço Unitário": row["Preço Unitário"], "Quantidade": qtd}])
-                            st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
-                            st.rerun()
+                        try:
+                            v_qtd = float(qtd_manual.replace(',', '.'))
+                            if v_qtd > 0:
+                                novo = pd.DataFrame([{"CÓDIGO": row["CÓDIGO"], "Artigo": row["DESCRIÇÃO"], "UNID": row["UNID"], "Preço Unitário": row["Preço Unitário"], "Quantidade": v_qtd}])
+                                st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
+                                st.rerun()
+                        except:
+                            st.error("Qtd Inválida")
 
 with tab2:
-    st.write("Utilize esta secção para itens que não existem na tabela de preços.")
-    m1, m2, m3 = st.columns([1, 3, 1])
-    m_cod = m1.text_input("Código Novo", value="EXTRA")
-    m_desc = m2.text_input("Descrição do Artigo/Serviço")
-    m_unid = m3.text_input("Unidade", value="un")
-    
-    m4, m5, m6 = st.columns([1, 1, 1])
-    m_preco = m4.number_input("Preço Unitário (€)", min_value=0.0, step=0.5)
-    m_qtd = m5.number_input("Quantidade", min_value=0.1, step=1.0)
-    
-    if m6.button("➕ Adicionar Artigo Especial", use_container_width=True):
-        if m_desc:
-            novo_extra = pd.DataFrame([{"CÓDIGO": m_cod, "Artigo": m_desc, "UNID": m_unid, "Preço Unitário": m_preco, "Quantidade": m_qtd}])
-            st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo_extra], ignore_index=True)
+    # Lógica de item extra (manual) permanece para flexibilidade
+    e1, e2, e3, e4 = st.columns([2, 1, 1, 1])
+    desc_ex = e1.text_input("Descrição do Item Extra")
+    preco_ex = e2.number_input("Preço Unit.", min_value=0.0)
+    qtd_ex = e3.text_input("Qtd Extra")
+    if e4.button("Adicionar Extra", use_container_width=True):
+        if desc_ex and qtd_ex:
+            novo_ex = pd.DataFrame([{"CÓDIGO": "EXTRA", "Artigo": desc_ex, "UNID": "un", "Preço Unitário": preco_ex, "Quantidade": float(qtd_ex.replace(',','.'))}])
+            st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo_ex], ignore_index=True)
             st.rerun()
-        else:
-            st.warning("Preencha a descrição do artigo.")
 
 # --------------------------------------------------
-# 5. ITENS APURADOS (EDIÇÃO TOTAL HABILITADA)
+# 5. ITENS APURADOS (COR DIFERENTE AO ALTERAR)
 # --------------------------------------------------
 st.divider()
-st.subheader("📝 2. Itens Apurados (Pode alterar preços e quantidades aqui)")
+st.subheader("📝 2. Itens Apurados (Edição de Valores)")
 
 if not st.session_state.itens_orcamento.empty:
-    # AQUI ESTÁ A CHAVE: Coluna 'Preço Unitário' e 'Quantidade' estão editáveis
+    st.info("Dica: Ao alterar o Preço ou Qtd, a célula muda de cor. Clique no botão 'Atualizar' para confirmar.")
+    
+    # O data_editor destaca visualmente as alterações feitas
     df_editado = st.data_editor(
         st.session_state.itens_orcamento,
         use_container_width=True,
         hide_index=True,
         num_rows="dynamic",
-        key="editor_final",
+        key="editor_apurados",
         column_config={
             "CÓDIGO": st.column_config.TextColumn("Cód", disabled=True),
-            "Artigo": st.column_config.TextColumn("Descrição", width="large"), # Editável se quiser mudar o nome
+            "Artigo": st.column_config.TextColumn("Descrição", width="large", disabled=True),
             "Preço Unitário": st.column_config.NumberColumn("V. Unit (€)", format="%.2f", min_value=0.0),
             "Quantidade": st.column_config.NumberColumn("Qtd", format="%.2f", min_value=0.0)
         }
     )
     
-    # Atualiza os dados na sessão sempre que houver alterações
-    if st.button("💾 Validar/Atualizar Cálculos"):
+    if st.button("💾 Atualizar Totais e Gravar Alterações"):
         st.session_state.itens_orcamento = df_editado
         st.rerun()
 else:
-    st.info("O orçamento está vazio.")
+    st.write("Orçamento vazio.")
 
 # --------------------------------------------------
-# 6. EXPORTAÇÃO (PDF E EXCEL)
+# 6. SIDEBAR
 # --------------------------------------------------
-if not st.session_state.itens_orcamento.empty:
-    st.divider()
-    c_pdf, c_xls, c_clear = st.columns(3)
-    
-    with c_pdf:
-        # Lógica simplificada de PDF (pode expandir com a sua anterior)
-        if st.button("📥 Baixar PDF"):
-            st.write("Gerando PDF...") # Integra aqui a função reportlab anterior
-            
-    with c_xls:
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            st.session_state.itens_orcamento.to_excel(writer, index=False)
-        st.download_button("📥 Baixar Excel", output.getvalue(), "orcamento.xlsx")
-
-    with c_clear:
-        if st.button("🗑️ Limpar Tudo"):
-            st.session_state.itens_orcamento = pd.DataFrame(columns=["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"])
-            st.rerun()
+with st.sidebar:
+    if st.button("🗑️ Limpar Tudo"):
+        st.session_state.itens_orcamento = pd.DataFrame(columns=["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"])
+        st.rerun()
