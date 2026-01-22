@@ -61,13 +61,15 @@ if "lista_orcamentos" not in st.session_state:
 res = st.session_state["lista_orcamentos"][st.session_state["orc_atual"]]
 
 # --------------------------------------------------
-# 4. Interface Superior (Dados, Totais e Botões)
+# 4. Interface Superior
 # --------------------------------------------------
 col_log, col_info, col_exp = st.columns([1, 2, 1.5])
 
 with col_log:
     if os.path.exists(LOGO_PATH):
         st.image(LOGO_PATH, width=180)
+    else:
+        st.warning("logo.png não encontrado.")
 
 with col_info:
     st.markdown(f"### 📋 {st.session_state['orc_atual']}")
@@ -80,7 +82,6 @@ with col_exp:
     st.markdown("### 📄 Exportação e Total")
     iva_p = st.selectbox("IVA (%)", [0, 6, 13, 23], index=3)
     
-    # Cálculo rigoroso dos itens selecionados
     df_finais = res["dados"][res["dados"]["Quantidade"] > 0].copy()
     
     if not df_finais.empty:
@@ -94,32 +95,64 @@ with col_exp:
         
         c_pdf, c_xls = st.columns(2)
         
-        # --- GERAÇÃO DE PDF ---
         with c_pdf:
             pdf_buffer = io.BytesIO()
-            doc = SimpleDocTemplate(pdf_buffer, pagesize=A4)
+            doc = SimpleDocTemplate(pdf_buffer, pagesize=A4, topMargin=20)
             styles = getSampleStyleSheet()
             elements = []
             
-            # Cabeçalho PDF
-            title_st = ParagraphStyle('T', parent=styles['Title'], alignment=TA_CENTER)
-            elements.append(Paragraph(f"ORÇAMENTO: {res['cliente']}", title_st))
-            elements.append(Paragraph(f"Morada: {res['morada']} | Tel: {res['telefone']}", styles['Normal']))
+            # --- LOGOTIPO NO PDF ---
+            if os.path.exists(LOGO_PATH):
+                logo_pdf = Image(LOGO_PATH, width=120, height=60)
+                logo_pdf.hAlign = 'CENTER'
+                elements.append(logo_pdf)
+                elements.append(Spacer(1, 15))
+            
+            title_st = ParagraphStyle('T', parent=styles['Title'], alignment=TA_CENTER, fontSize=18)
+            elements.append(Paragraph(f"ORÇAMENTO", title_st))
+            elements.append(Spacer(1, 10))
+            
+            # Dados do Cliente
+            elements.append(Paragraph(f"<b>Cliente:</b> {res['cliente']}", styles['Normal']))
+            elements.append(Paragraph(f"<b>Telefone:</b> {res['telefone']}", styles['Normal']))
+            elements.append(Paragraph(f"<b>Morada:</b> {res['morada']}", styles['Normal']))
+            elements.append(Paragraph(f"<b>Data:</b> {date.today().strftime('%d/%m/%Y')}", styles['Normal']))
             elements.append(Spacer(1, 20))
             
-            # Tabela PDF
-            data_pdf = [["Descrição", "Un", "Qtd", "Preço", "Total"]]
+            # Tabela de Itens
+            data_pdf = [["Descrição", "Un", "Qtd", "Preço Unit.", "Total"]]
             for _, r in df_finais.iterrows():
-                data_pdf.append([r["DESCRIÇÃO"][:50], r["UNID"], f"{r['Quantidade']}", f"{r['Preço Unitário']:.2f}€", f"{r['Total_Linha']:.2f}€"])
-            data_pdf.append(["", "", "", "TOTAL:", f"{total_final:,.2f}€"])
+                data_pdf.append([
+                    Paragraph(r["DESCRIÇÃO"], styles['Normal']), 
+                    r["UNID"], 
+                    f"{r['Quantidade']}", 
+                    f"{r['Preço Unitário']:,.2f}€", 
+                    f"{r['Total_Linha']:,.2f}€"
+                ])
             
-            table = Table(data_pdf, colWidths=[240, 30, 40, 70, 70])
-            table.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.lightgrey), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)]))
+            # Linhas de Total
+            data_pdf.append(["", "", "", "SUBTOTAL:", f"{subtotal:,.2f}€"])
+            data_pdf.append(["", "", "", f"IVA ({iva_p}%):", f"{valor_iva:,.2f}€"])
+            data_pdf.append(["", "", "", "TOTAL FINAL:", f"{total_final:,.2f}€"])
+            
+            table = Table(data_pdf, colWidths=[240, 30, 40, 80, 80])
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#eeeeee")),
+                ('GRID', (0,0), (-1,-4), 0.5, colors.grey),
+                ('ALIGN', (3,0), (-1,-1), 'RIGHT'),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
+            ]))
             elements.append(table)
+            
+            if res["notas"]:
+                elements.append(Spacer(1, 20))
+                elements.append(Paragraph("<b>Observações:</b>", styles['Normal']))
+                elements.append(Paragraph(res["notas"], styles['Normal']))
+                
             doc.build(elements)
             st.download_button("⬇️ Baixar PDF", pdf_buffer.getvalue(), f"Orcamento_{res['cliente']}.pdf", "application/pdf")
             
-        # --- GERAÇÃO DE EXCEL ---
         with c_xls:
             output_ex = io.BytesIO()
             with pd.ExcelWriter(output_ex, engine='xlsxwriter') as writer:
@@ -130,26 +163,7 @@ with col_exp:
         st.warning("Adicione quantidades para ver o total.")
 
 # --------------------------------------------------
-# 5. Sidebar (Backup e Novo Orçamento)
-# --------------------------------------------------
-with st.sidebar:
-    st.header("💾 Backup Local")
-    st.download_button("📥 Guardar Backup", pickle.dumps(st.session_state["lista_orcamentos"]), f"backup_{date.today()}.pkl")
-    arq = st.file_uploader("📂 Restaurar Backup", type=["pkl"])
-    if arq:
-        st.session_state["lista_orcamentos"] = pickle.loads(arq.read())
-        st.rerun()
-    st.divider()
-    if st.button("➕ Novo Orçamento"):
-        novo = f"Orçamento {len(st.session_state['lista_orcamentos']) + 1}"
-        st.session_state["lista_orcamentos"][novo] = {
-            "cliente": "", "morada": "", "telefone": "", "obra": "", "data_visita": date.today(), "notas": "", "dados": carregar_base_limpa()
-        }
-        st.session_state["orc_atual"] = novo
-        st.rerun()
-
-# --------------------------------------------------
-# 6. Pesquisa e Itens Apurados
+# 5. Tabelas de Edição (Corpo)
 # --------------------------------------------------
 st.divider()
 st.subheader("🔍 1. Pesquisar e Adicionar Artigos")
@@ -189,3 +203,17 @@ if not df_apurados.empty:
         on_change=sincronizar_dados, args=(f"edit_{st.session_state['orc_atual']}",)
     )
     res["notas"] = st.text_area("Notas / Observações", res["notas"])
+
+# --------------------------------------------------
+# 6. Sidebar
+# --------------------------------------------------
+with st.sidebar:
+    st.header("💾 Backup")
+    st.download_button("📥 Guardar Backup", pickle.dumps(st.session_state["lista_orcamentos"]), f"backup_{date.today()}.pkl")
+    if st.button("➕ Novo Orçamento"):
+        novo = f"Orçamento {len(st.session_state['lista_orcamentos']) + 1}"
+        st.session_state["lista_orcamentos"][novo] = {
+            "cliente": "", "morada": "", "telefone": "", "obra": "", "data_visita": date.today(), "notas": "", "dados": carregar_base_limpa()
+        }
+        st.session_state["orc_atual"] = novo
+        st.rerun()
