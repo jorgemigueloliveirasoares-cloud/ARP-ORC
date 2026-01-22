@@ -22,7 +22,8 @@ def carregar_base():
         try:
             df = pd.read_excel(caminho)
             df.columns = [str(c).strip() for c in df.columns]
-            col_preco = "VALORES ATUAIS JANEIRO 2025"
+            # Ajuste o nome da coluna conforme a sua tabela Excel
+            col_preco = "VALORES ATUAIS JANEIRO 2025" 
             df = df[["CÓDIGO", "DESCRIÇÃO", "UNID", col_preco]].dropna(subset=["CÓDIGO"])
             df.rename(columns={col_preco: "Preço Unitário"}, inplace=True)
             df["CÓDIGO"] = df["CÓDIGO"].astype(str).str.strip()
@@ -37,7 +38,8 @@ if "itens_orcamento" not in st.session_state:
 col_log, col_cli, col_rasc = st.columns([1.2, 2.5, 1.2])
 
 with col_log:
-    if os.path.exists("logo.png"): st.image("logo.png", width=180)
+    if os.path.exists("logo.png"): 
+        st.image("logo.png", width=180)
 
 with col_cli:
     st.subheader("📋 Dados do Cliente")
@@ -52,14 +54,12 @@ with col_rasc:
     st.subheader("💾 Backup / Rascunho")
     n_orc = st.text_input("Nº Orçamento", value=f"ORC-{date.today().year}-001")
     
-    # Gerar ficheiro de Backup (JSON)
     dados_backup = {
         "cliente": {"nome": nome_cli, "morada": morada_cli, "tel": tel_cli, "email": email_cli, "obs": obs_cli, "n_orc": n_orc},
         "itens": st.session_state.itens_orcamento.to_dict(orient="records")
     }
     st.download_button("📥 Guardar Backup", data=json.dumps(dados_backup), file_name=f"backup_{n_orc}.json", use_container_width=True)
     
-    # Upload de Backup
     u_backup = st.file_uploader("📂 Upload de Backup", type="json", label_visibility="collapsed")
     if u_backup:
         carregados = json.load(u_backup)
@@ -112,13 +112,19 @@ if not st.session_state.itens_orcamento.empty:
     total_val = df_final["Subtotal"].sum()
     st.write(f"### Total: {total_val:,.2f}€")
 
-    # FUNÇÃO PDF SEM O CÓDIGO DO ARTIGO
     def criar_pdf(df, total):
         buf = io.BytesIO()
-        doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20)
+        doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20, bottomMargin=20)
         sty = getSampleStyleSheet()
+        
+        # Estilo customizado para o texto dentro da tabela (Word Wrap)
+        estilo_tabela = sty['Normal']
+        estilo_tabela.fontSize = 9
+        estilo_tabela.leading = 11  # Espaçamento entre linhas dentro da célula
+        
         elems = []
         
+        # Logo
         if os.path.exists("logo.png"):
             img = RLImage("logo.png", width=1.5*inch, height=0.8*inch)
             img.hAlign = 'LEFT'
@@ -127,18 +133,31 @@ if not st.session_state.itens_orcamento.empty:
         elems.append(Paragraph(f"ORÇAMENTO: {n_orc}", sty['Title']))
         elems.append(Spacer(1, 10))
         
-        # Dados do Cliente no PDF
+        # Dados do Cliente
         cli_info = f"<b>Cliente:</b> {nome_cli}<br/><b>Morada:</b> {morada_cli}<br/><b>Tel:</b> {tel_cli}<br/><b>Email:</b> {email_cli}"
         elems.append(Paragraph(cli_info, sty['Normal']))
         elems.append(Spacer(1, 20))
         
-        # Tabela (Removido o Código do Artigo)
+        # Cabeçalho da Tabela
         data = [["Artigo / Descrição", "Qtd", "Unid", "Preço Unit.", "Total"]]
-        for _, r in df.iterrows():
-            data.append([r['Artigo'][:65], r['Quantidade'], r['UNID'], f"{r['Preço Unitário']:.2f}€", f"{r['Subtotal']:.2f}€"])
         
+        # Linhas da Tabela
+        for _, r in df.iterrows():
+            # A alteração principal: envolver o Artigo num Paragraph
+            artigo_formatado = Paragraph(r['Artigo'], estilo_tabela)
+            
+            data.append([
+                artigo_formatado, 
+                r['Quantidade'], 
+                r['UNID'], 
+                f"{r['Preço Unitário']:.2f}€", 
+                f"{r['Subtotal']:.2f}€"
+            ])
+        
+        # Linha do Total
         data.append(["", "", "", "TOTAL:", f"{total:,.2f}€"])
         
+        # Configuração das larguras das colunas (total ~500 pontos)
         t = Table(data, colWidths=[280, 40, 40, 70, 70])
         t.setStyle(TableStyle([
             ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
@@ -146,7 +165,10 @@ if not st.session_state.itens_orcamento.empty:
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
             ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
             ('BACKGROUND', (0,-1), (-1,-1), colors.lightgrey),
-            ('ALIGN', (1,0), (-1,-1), 'CENTER'),
+            ('ALIGN', (1,0), (-1,-1), 'CENTER'), # Centraliza Qtd, Unid, etc
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),    # ALINHAMENTO VERTICAL AO TOPO
+            ('LEFTPADDING', (0,0), (-1,-1), 5),
+            ('RIGHTPADDING', (0,0), (-1,-1), 5),
         ]))
         elems.append(t)
         
@@ -171,5 +193,3 @@ if not st.session_state.itens_orcamento.empty:
     if c_limp.button("🗑️ Limpar Tudo", use_container_width=True):
         st.session_state.itens_orcamento = pd.DataFrame(columns=["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"])
         st.rerun()
-
-
