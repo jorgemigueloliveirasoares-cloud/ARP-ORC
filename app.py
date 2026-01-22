@@ -8,9 +8,10 @@ from datetime import date
 # Bibliotecas para PDF (ReportLab)
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.units import inch
+from reportlab.lib.enums import TA_CENTER, TA_RIGHT
 
 # --------------------------------------------------
 # 1. CONFIGURAÇÃO E CARREGAMENTO DE DADOS
@@ -24,6 +25,7 @@ def carregar_base():
         try:
             df = pd.read_excel(caminho)
             df.columns = [str(c).strip() for c in df.columns]
+            # Nome da coluna de preço conforme o teu ficheiro
             col_preco = "VALORES ATUAIS JANEIRO 2025"
             df = df[["CÓDIGO", "DESCRIÇÃO", "UNID", col_preco]].dropna(subset=["CÓDIGO"])
             df.rename(columns={col_preco: "Preço Unitário"}, inplace=True)
@@ -33,6 +35,7 @@ def carregar_base():
         except: pass
     return pd.DataFrame(columns=["CÓDIGO", "DESCRIÇÃO", "UNID", "Preço Unitário"])
 
+# Inicialização do estado da sessão
 if "itens_orcamento" not in st.session_state:
     st.session_state.itens_orcamento = pd.DataFrame(columns=["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"])
 
@@ -45,7 +48,7 @@ with col_log:
     if os.path.exists("logo.png"):
         st.image("logo.png", width=180)
     else:
-        st.warning("⚠️ logo.png não encontrado.")
+        st.info("💡 Coloca 'logo.png' na pasta para aparecer aqui.")
 
 with col_cli:
     st.markdown("### 📋 Dados do Cliente")
@@ -60,34 +63,33 @@ with col_rasc:
     st.markdown("### 💾 Gestão de Rascunhos")
     n_orc = st.text_input("Nº Orçamento", value=f"ORC-{date.today().year}-{date.today().month:02d}-001")
     
-    # Botão para Guardar rascunho em JSON (Inclui Notas agora)
+    # Rascunho JSON
     dados_rasc = {
-        "cliente": {
-            "nome": nome_cli, "morada": morada_cli, "tel": tel_cli, 
-            "email": email_cli, "n_orc": n_orc, "obs": obs_cli
-        },
+        "cliente": {"nome": nome_cli, "morada": morada_cli, "tel": tel_cli, "email": email_cli, "n_orc": n_orc, "obs": obs_cli},
         "itens": st.session_state.itens_orcamento.to_dict(orient="records")
     }
     st.download_button("📥 Guardar Rascunho (JSON)", data=json.dumps(dados_rasc), 
                        file_name=f"Rascunho_{n_orc}.json", mime="application/json", use_container_width=True)
     
-    # Upload para carregar rascunho
     u_rasc = st.file_uploader("📂 Carregar Rascunho", type="json", label_visibility="collapsed")
     if u_rasc:
-        carregados = json.load(u_rasc)
-        st.session_state.itens_orcamento = pd.DataFrame(carregados["itens"])
-        st.success("Rascunho carregado!")
+        try:
+            carregados = json.load(u_rasc)
+            st.session_state.itens_orcamento = pd.DataFrame(carregados["itens"])
+            st.success("Itens carregados com sucesso!")
+        except:
+            st.error("Erro ao carregar o ficheiro JSON.")
 
 st.divider()
 
 # --------------------------------------------------
 # 3. ADIÇÃO DE ITENS (EXCEL VS MANUAL)
 # --------------------------------------------------
-st.subheader("🔍 1. Adicionar Itens ao Orçamento")
-t1, t2 = st.tabs(["🔎 Pesquisar no Excel", "➕ Criar Artigo Manual"])
+st.subheader("🔍 1. Adicionar Itens")
+t1, t2 = st.tabs(["🔎 Pesquisar no Excel", "➕ Artigo Manual (Fora da Lista)"])
 
 with t1:
-    termo = st.text_input("Procurar (nome ou código):", key="search").strip()
+    termo = st.text_input("Pesquisar por nome ou código:", key="search").strip()
     if termo:
         base = carregar_base()
         mask = (base["DESCRIÇÃO"].str.contains(termo, case=False, na=False)) | (base["CÓDIGO"].str.contains(termo, case=False, na=False))
@@ -101,18 +103,20 @@ with t1:
                 qtd_tx = c4.text_input("Qtd", key=f"q_{row['CÓDIGO']}", label_visibility="collapsed", placeholder="0")
                 if c5.button("➕", key=f"b_{row['CÓDIGO']}"):
                     if qtd_tx:
-                        v = float(qtd_tx.replace(',', '.'))
-                        novo = pd.DataFrame([{"CÓDIGO": row["CÓDIGO"], "Artigo": row["DESCRIÇÃO"], "UNID": row["UNID"], "Preço Unitário": row["Preço Unitário"], "Quantidade": v}])
-                        st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
-                        st.rerun()
+                        try:
+                            v = float(qtd_tx.replace(',', '.'))
+                            novo = pd.DataFrame([{"CÓDIGO": row["CÓDIGO"], "Artigo": row["DESCRIÇÃO"], "UNID": row["UNID"], "Preço Unitário": row["Preço Unitário"], "Quantidade": v}])
+                            st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
+                            st.rerun()
+                        except: st.error("Qtd inválida.")
 
 with t2:
     m1, m2, m3, m4, m5, m6 = st.columns([1, 3, 1, 1, 1, 1])
     m_cod = m1.text_input("Cód", value="EXTRA")
     m_desc = m2.text_input("Descrição do Item")
     m_unid = m3.text_input("Unid", value="un")
-    m_prec = m4.number_input("Preço €", min_value=0.0)
-    m_qtd = m5.number_input("Qtd", min_value=0.0)
+    m_prec = m4.number_input("Preço €", min_value=0.0, format="%.2f")
+    m_qtd = m5.number_input("Quantidade", min_value=0.0, format="%.2f")
     if m6.button("Adicionar", use_container_width=True):
         if m_desc and m_qtd > 0:
             novo_m = pd.DataFrame([{"CÓDIGO": m_cod, "Artigo": m_desc, "UNID": m_unid, "Preço Unitário": m_prec, "Quantidade": m_qtd}])
@@ -120,10 +124,10 @@ with t2:
             st.rerun()
 
 # --------------------------------------------------
-# 4. TABELA DE APURADOS E TOTAIS
+# 4. TABELA DE APURADOS
 # --------------------------------------------------
 st.divider()
-st.subheader("📝 2. Itens Apurados")
+st.subheader("📝 2. Itens Apurados (Edição de Preços/Qtd ativa)")
 
 if not st.session_state.itens_orcamento.empty:
     df_v = st.session_state.itens_orcamento.copy()
@@ -137,73 +141,88 @@ if not st.session_state.itens_orcamento.empty:
         }, key="editor_final")
     
     total_g = df_editado["Subtotal (€)"].sum()
-    st.markdown(f"## **Total Geral: {total_g:,.2f} €**")
+    st.markdown(f"### **Total Geral: {total_g:,.2f} €**")
 
     # --------------------------------------------------
-    # 5. GERAÇÃO DE PDF COM LOGO E OBSERVAÇÕES
+    # 5. EXPORTAÇÕES E PDF (CORRIGIDO)
     # --------------------------------------------------
     col_pdf, col_xls, col_del = st.columns(3)
 
     def criar_pdf(df, total):
         buf = io.BytesIO()
-        doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20)
+        doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=30, bottomMargin=30)
         sty = getSampleStyleSheet()
+        
+        # Estilos customizados
+        estilo_tabela = ParagraphStyle('TabStyle', parent=sty['Normal'], fontSize=9)
+        estilo_total = ParagraphStyle('TotalStyle', parent=sty['Normal'], fontSize=10, fontName='Helvetica-Bold', alignment=TA_RIGHT)
+        
         elems = []
         
-        # 1. Logo
+        # Logo
         if os.path.exists("logo.png"):
             logo = RLImage("logo.png", width=1.5*inch, height=0.8*inch)
             logo.hAlign = 'LEFT'
             elems.append(logo)
         
-        # 2. Título e Dados Cliente
         elems.append(Paragraph(f"<b>ORÇAMENTO: {n_orc}</b>", sty['Title']))
-        elems.append(Spacer(1, 12))
-        elems.append(Paragraph(f"<b>Cliente:</b> {nome_cli}<br/><b>Morada:</b> {morada_cli}<br/><b>Tel:</b> {tel_cli}", sty['Normal']))
         elems.append(Spacer(1, 15))
+        elems.append(Paragraph(f"<b>Cliente:</b> {nome_cli}<br/><b>Morada:</b> {morada_cli}<br/><b>Tel:</b> {tel_cli}", sty['Normal']))
+        elems.append(Spacer(1, 20))
         
-        # 3. Tabela de Preços
+        # Montagem da Tabela (Sem tags HTML nas células diretas para evitar erro)
         data = [["Cód", "Artigo", "Qtd", "Unid", "Preço Unit.", "Subtotal"]]
         for _, r in df.iterrows():
-            data.append([r['CÓDIGO'], r['Artigo'][:55], f"{r['Quantidade']}", r['UNID'], f"{r['Preço Unitário']:.2f}€", f"{r['Subtotal (€)']:.2f}€"])
-        data.append(["", "", "", "", "<b>TOTAL:</b>", f"<b>{total:,.2f}€</b>"])
+            data.append([
+                r['CÓDIGO'], 
+                Paragraph(r['Artigo'][:80], estilo_tabela), 
+                f"{r['Quantidade']}", 
+                r['UNID'], 
+                f"{r['Preço Unitário']:.2f}€", 
+                f"{r['Subtotal (€)']:.2f}€"
+            ])
+        
+        # Linha de Total
+        data.append(["", "", "", "", "TOTAL:", f"{total:,.2f}€"])
         
         t = Table(data, colWidths=[60, 230, 40, 40, 70, 70])
         t.setStyle(TableStyle([
             ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
             ('BACKGROUND', (0,0), (-1,0), colors.whitesmoke),
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
             ('ALIGN', (2,0), (-1,-1), 'CENTER'),
+            ('ALIGN', (1,0), (1,-1), 'LEFT'),
+            ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'), # Aplica negrito à última linha
             ('BACKGROUND', (0,-1), (-1,-1), colors.lightgrey),
-            ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
         ]))
         elems.append(t)
         
-        # 4. Observações (Novidade)
         if obs_cli:
             elems.append(Spacer(1, 20))
-            elems.append(Paragraph("<b>Observações / Condições:</b>", sty['Normal']))
+            elems.append(Paragraph("<b>Observações:</b>", sty['Normal']))
             elems.append(Spacer(1, 5))
-            # Substituir quebras de linha para o PDF
-            obs_formatada = obs_cli.replace('\n', '<br/>')
-            elems.append(Paragraph(obs_formatada, sty['Normal']))
-        
+            elems.append(Paragraph(obs_cli.replace('\n', '<br/>'), sty['Normal']))
+            
         doc.build(elems)
         return buf.getvalue()
 
     with col_pdf:
-        st.download_button("📥 Gerar PDF Completo", data=criar_pdf(df_editado, total_g), file_name=f"Orcamento_{nome_cli}.pdf", use_container_width=True)
+        st.download_button("📥 Gerar PDF", data=criar_pdf(df_editado, total_g), file_name=f"Orcamento_{n_orc}.pdf", use_container_width=True)
 
     with col_xls:
         buf_x = io.BytesIO()
         with pd.ExcelWriter(buf_x, engine='xlsxwriter') as wr:
             df_editado.to_excel(wr, index=False)
-        st.download_button("📊 Gerar Excel", data=buf_x.getvalue(), file_name=f"Orcamento_{nome_cli}.xlsx", use_container_width=True)
+        st.download_button("📊 Gerar Excel", data=buf_x.getvalue(), file_name=f"Orcamento_{n_orc}.xlsx", use_container_width=True)
 
     with col_del:
-        if st.button("🗑️ Limpar Tudo"):
+        if st.button("🗑️ Limpar Tudo", use_container_width=True):
             st.session_state.itens_orcamento = pd.DataFrame(columns=["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"])
             st.rerun()
 
-    if st.button("💾 Atualizar Totais"):
+    if st.button("💾 Validar e Gravar Alterações de Preço/Qtd"):
         st.session_state.itens_orcamento = df_editado[["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"]]
         st.rerun()
+else:
+    st.info("O orçamento está vazio. Adicione artigos acima.")
