@@ -10,18 +10,19 @@ import io
 import os
 import pickle
 
+# --------------------------------------------------
 # 1. Configuração e Estética
+# --------------------------------------------------
 st.set_page_config(page_title="Orçamentador Pro", layout="wide")
 
 LOGO_PATH = "logo.png" 
 EXCEL_PATH = "Cópia de Preços Tabela atual.xlsx"
 
-# Exibição do Logo na Web
 if os.path.exists(LOGO_PATH):
     st.image(LOGO_PATH, width=250)
 
 # --------------------------------------------------
-# Funções de Suporte
+# 2. Funções de Suporte
 # --------------------------------------------------
 def carregar_base_limpa():
     if os.path.exists(EXCEL_PATH):
@@ -37,7 +38,7 @@ def carregar_base_limpa():
     return pd.DataFrame(columns=["CÓDIGO", "DESCRIÇÃO", "UNID", "Preço Unitário", "Quantidade"])
 
 # --------------------------------------------------
-# Gestão de Estado (Sessão)
+# 3. Gestão de Estado (Sessão)
 # --------------------------------------------------
 if "lista_orcamentos" not in st.session_state:
     st.session_state["lista_orcamentos"] = {
@@ -46,7 +47,7 @@ if "lista_orcamentos" not in st.session_state:
     st.session_state["orc_atual"] = "Orçamento 1"
 
 # --------------------------------------------------
-# Sidebar: Gestão de Sessões e Backup
+# 4. Sidebar: Gestão de Sessões e Backup
 # --------------------------------------------------
 with st.sidebar:
     st.header("💾 Sistema de Backup")
@@ -94,13 +95,13 @@ with st.sidebar:
     iva_percent = st.selectbox("IVA (%)", [0, 6, 13, 23], index=3)
 
 # --------------------------------------------------
-# Área de Trabalho Principal
+# 5. Área de Trabalho Principal
 # --------------------------------------------------
-st.title(f"📐 {st.session_state['orc_atual']}")
+st.title(f"📐 Editando: {st.session_state['orc_atual']}")
 dados_atuais = st.session_state["lista_orcamentos"][st.session_state["orc_atual"]]["dados"]
 
 # Adicionar Item Manual
-with st.expander("➕ Adicionar item personalizado (que não existe na tabela)"):
+with st.expander("➕ Adicionar item personalizado"):
     c1, c2, c3, c4 = st.columns([1, 3, 1, 1])
     n_cod = c1.text_input("Cód")
     n_des = c2.text_input("Descrição")
@@ -118,27 +119,34 @@ mask = dados_atuais["DESCRIÇÃO"].str.contains(pesquisa, case=False, na=False) 
 
 df_view = dados_atuais[mask | (dados_atuais["Quantidade"] > 0)].copy()
 
+# A chave dinâmica garante que o editor atualize após carregar o backup
+editor_key = f"editor_{st.session_state['orc_atual']}"
+
 edited_df = st.data_editor(
     df_view,
     column_config={
         "Preço Unitário": st.column_config.NumberColumn("Preço (€)", format="%.2f"),
         "Quantidade": st.column_config.NumberColumn("Qtd", min_value=0.0, step=0.1)
     },
-    hide_index=True, use_container_width=True
+    hide_index=True, 
+    use_container_width=True,
+    key=editor_key
 )
 
-# Sincronização com o estado global
-for idx in edited_df.index:
-    st.session_state["lista_orcamentos"][st.session_state["orc_atual"]]["dados"].at[idx, "Quantidade"] = edited_df.loc[idx, "Quantidade"]
-    st.session_state["lista_orcamentos"][st.session_state["orc_atual"]]["dados"].at[idx, "Preço Unitário"] = edited_df.loc[idx, "Preço Unitário"]
+# Sincronização rigorosa com o estado global
+if edited_df is not None:
+    for idx in edited_df.index:
+        st.session_state["lista_orcamentos"][st.session_state["orc_atual"]]["dados"].at[idx, "Quantidade"] = edited_df.loc[idx, "Quantidade"]
+        st.session_state["lista_orcamentos"][st.session_state["orc_atual"]]["dados"].at[idx, "Preço Unitário"] = edited_df.loc[idx, "Preço Unitário"]
 
 st.divider()
 res["notas"] = st.text_area("📝 Notas / Observações do Orçamento", res["notas"])
 
 # --------------------------------------------------
-# Totais e Exportação Final
+# 6. Totais e Exportação (PDF e Excel)
 # --------------------------------------------------
-itens_finais = dados_atuais[dados_atuais["Quantidade"] > 0].copy()
+itens_finais = st.session_state["lista_orcamentos"][st.session_state["orc_atual"]]["dados"].copy()
+itens_finais = itens_finais[itens_finais["Quantidade"] > 0]
 
 if not itens_finais.empty:
     itens_finais["Total"] = itens_finais["Quantidade"] * itens_finais["Preço Unitário"]
@@ -146,34 +154,31 @@ if not itens_finais.empty:
     valor_iva = subtotal * (iva_percent / 100)
     total_geral = subtotal + valor_iva
 
-    col_a, col_b, col_c = st.columns(3)
-    col_a.metric("Subtotal", f"{subtotal:,.2f} €")
-    col_b.metric(f"IVA ({iva_percent}%)", f"{valor_iva:,.2f} €")
-    col_c.subheader(f"TOTAL: {total_geral:,.2f} €")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Subtotal", f"{subtotal:,.2f} €")
+    c2.metric(f"IVA ({iva_percent}%)", f"{valor_iva:,.2f} €")
+    c3.subheader(f"TOTAL: {total_geral:,.2f} €")
 
-    st.write("### Exportar Documentos")
-    c_pdf, c_xls = st.columns(2)
+    st.write("### Gerar Documentos")
+    col_pdf, col_xls = st.columns(2)
 
-    with c_pdf:
+    with col_pdf:
         pdf_buffer = io.BytesIO()
         doc = SimpleDocTemplate(pdf_buffer, pagesize=A4)
         styles = getSampleStyleSheet()
         elements = []
 
-        # Logo no PDF
         if os.path.exists(LOGO_PATH):
             img = Image(LOGO_PATH, width=150, height=75)
             img.hAlign = 'CENTER'
             elements.append(img)
             elements.append(Spacer(1, 15))
 
-        # Cabeçalho PDF
         title_st = ParagraphStyle('T', parent=styles['Title'], alignment=TA_CENTER)
         elements.append(Paragraph(f"ORÇAMENTO: {res['obra']}", title_st))
         elements.append(Paragraph(f"<b>Cliente:</b> {res['cliente']} | <b>Data:</b> {date.today()}", styles['Normal']))
         elements.append(Spacer(1, 20))
 
-        # Tabela de Itens
         data = [["Cód", "Descrição", "Un", "Qtd", "Preço", "Total"]]
         for _, r in itens_finais.iterrows():
             data.append([r["CÓDIGO"], r["DESCRIÇÃO"][:55], r["UNID"], f"{r['Quantidade']:.2f}", f"{r['Preço Unitário']:.2f}€", f"{r['Total']:.2f}€"])
@@ -189,7 +194,6 @@ if not itens_finais.empty:
         ]))
         elements.append(table)
 
-        # Notas no PDF
         if res["notas"]:
             elements.append(Spacer(1, 20))
             elements.append(Paragraph("<b>Observações:</b>", styles['Normal']))
@@ -198,14 +202,13 @@ if not itens_finais.empty:
         doc.build(elements)
         st.download_button("⬇️ Baixar PDF", pdf_buffer.getvalue(), f"Orcamento_{res['cliente']}.pdf", "application/pdf")
 
-    with c_xls:
+    with col_xls:
         output_ex = io.BytesIO()
         with pd.ExcelWriter(output_ex, engine='xlsxwriter') as writer:
             itens_finais.to_excel(writer, index=False, sheet_name='Itens')
-            # Adicionar Notas numa segunda aba ou abaixo
-            df_notas = pd.DataFrame([{"Notas": res["notas"]}])
-            df_notas.to_excel(writer, index=False, sheet_name='Notas')
+            df_resumo = pd.DataFrame([{"Cliente": res["cliente"], "Obra": res["obra"], "Total": total_geral, "Notas": res["notas"]}])
+            df_resumo.to_excel(writer, index=False, sheet_name='Resumo')
             
         st.download_button("⬇️ Baixar Excel", output_ex.getvalue(), f"Orcamento_{res['cliente']}.xlsx")
 else:
-    st.info("Adicione quantidades aos itens para habilitar a exportação.")
+    st.info("Insira quantidades para desbloquear os botões de exportação.")
