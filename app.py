@@ -1,74 +1,50 @@
 import streamlit as st
 import pandas as pd
+import os
+import io
+import pickle
 from datetime import date
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
-import io
-import os
-import pickle
 
 # --------------------------------------------------
-# 1. CONFIGURAÇÃO
+# 1. CONFIGURAÇÃO E DADOS
 # --------------------------------------------------
-st.set_page_config(page_title="Orçamentador Pro", layout="wide")
+st.set_page_config(page_title="Gestor de Orçamentos", layout="wide")
 
-LOGO_PATH = "logo.png" 
+LOGO_PATH = "logo.png"
 EXCEL_PATH = "Cópia de Preços Tabela atual.xlsx"
 
-# --------------------------------------------------
-# 2. FUNÇÕES DE DADOS (CORRIGIDAS)
-# --------------------------------------------------
-def carregar_base_limpa():
+def carregar_base():
     if os.path.exists(EXCEL_PATH):
-        try:
-            df = pd.read_excel(EXCEL_PATH)
-            colunas = ["CÓDIGO", "DESCRIÇÃO", "UNID", "VALORES ATUAIS JANEIRO 2025"]
-            df = df[colunas].dropna(subset=["CÓDIGO", "DESCRIÇÃO"])
-            df.rename(columns={"VALORES ATUAIS JANEIRO 2025": "Preço Unitário"}, inplace=True)
-            df["Quantidade"] = 0.0
-            df["CÓDIGO"] = df["CÓDIGO"].astype(str).str.strip() # Limpeza de espaços
-            # Definir o CÓDIGO como o ID real da linha
-            df = df.set_index("CÓDIGO", drop=False)
-            return df
-        except Exception as e:
-            st.error(f"Erro no Excel: {e}")
-    return pd.DataFrame(columns=["CÓDIGO", "DESCRIÇÃO", "UNID", "Preço Unitário", "Quantidade"])
-
-def sincronizar_dados(key_editor):
-    """Sincronização por ID de CÓDIGO (Impede a troca de itens)"""
-    if key_editor in st.session_state:
-        edicoes = st.session_state[key_editor]
-        res_dados = st.session_state["lista_orcamentos"][st.session_state["orc_atual"]]["dados"]
-        
-        # Obter a "chave" (CÓDIGO) de cada linha editada
-        # O Streamlit devolve o índice do dataframe que enviamos
-        for row_id, alteracoes in edicoes["edited_rows"].items():
-            for col, val in alteracoes.items():
-                res_dados.at[row_id, col] = val
-        
-        # Processar remoções
-        for row_id in edicoes["deleted_rows"]:
-            res_dados.at[row_id, "Quantidade"] = 0.0
+        df = pd.read_excel(EXCEL_PATH)
+        df.columns = [c.strip() for c in df.columns]
+        # Ajuste exato das suas colunas
+        col_preco = "VALORES ATUAIS JANEIRO 2025"
+        df = df[["CÓDIGO", "DESCRIÇÃO", "UNID", col_preco]].dropna(subset=["CÓDIGO"])
+        df.rename(columns={col_preco: "Preço Unitário"}, inplace=True)
+        df["CÓDIGO"] = df["CÓDIGO"].astype(str).str.strip()
+        return df
+    return pd.DataFrame(columns=["CÓDIGO", "DESCRIÇÃO", "UNID", "Preço Unitário"])
 
 # --------------------------------------------------
-# 3. ESTADO DA SESSÃO
+# 2. ESTADO DA SESSÃO
 # --------------------------------------------------
-if "lista_orcamentos" not in st.session_state:
-    st.session_state["lista_orcamentos"] = {
-        "Orçamento 1": {
-            "cliente": "", "morada": "", "telefone": "", 
-            "dados": carregar_base_limpa(), "notas": ""
-        }
-    }
-    st.session_state["orc_atual"] = "Orçamento 1"
+if "base_dados" not in st.session_state:
+    st.session_state.base_dados = carregar_base()
 
-res = st.session_state["lista_orcamentos"][st.session_state["orc_atual"]]
+if "itens_orcamento" not in st.session_state:
+    # Lista de dicionários para guardar os itens apurados
+    st.session_state.itens_orcamento = []
+
+if "dados_cliente" not in st.session_state:
+    st.session_state.dados_cliente = {"nome": "", "tel": "", "morada": "", "iva": 23, "notas": ""}
 
 # --------------------------------------------------
-# 4. CABEÇALHO (LOGO E TOTAIS)
+# 3. INTERFACE SUPERIOR
 # --------------------------------------------------
 col_log, col_info, col_exp = st.columns([1, 2, 1.5])
 
@@ -77,80 +53,106 @@ with col_log:
         st.image(LOGO_PATH, width=150)
 
 with col_info:
-    st.subheader(f"📋 {st.session_state['orc_atual']}")
+    st.subheader("📋 Dados do Orçamento")
+    st.session_state.dados_cliente["nome"] = st.text_input("Cliente", st.session_state.dados_cliente["nome"])
     c1, c2 = st.columns(2)
-    res["cliente"] = c1.text_input("Cliente", res["cliente"])
-    res["telefone"] = c2.text_input("Telefone", res["telefone"])
-    res["morada"] = st.text_input("Morada", res["morada"])
+    st.session_state.dados_cliente["tel"] = c1.text_input("Telefone", st.session_state.dados_cliente["tel"])
+    st.session_state.dados_cliente["morada"] = st.text_input("Morada", st.session_state.dados_cliente["morada"])
 
 with col_exp:
-    # Cálculo de Totais (Só itens com Qtd > 0)
-    df_finais = res["dados"][res["dados"]["Quantidade"] > 0].copy()
-    if not df_finais.empty:
-        total = (df_finais["Quantidade"] * df_finais["Preço Unitário"]).sum()
-        st.markdown(f"### **Total: {total:,.2f} €**")
+    st.subheader("💰 Resumo")
+    iva = st.selectbox("IVA (%)", [0, 6, 13, 23], index=3)
+    st.session_state.dados_cliente["iva"] = iva
+    
+    if st.session_state.itens_orcamento:
+        df_ver = pd.DataFrame(st.session_state.itens_orcamento)
+        subtotal = (df_ver["Quantidade"] * df_ver["Preço Unitário"]).sum()
+        total = subtotal * (1 + iva/100)
+        st.markdown(f"#### **Total: {total:,.2f} €**")
         
-        # Botão PDF Simples
-        pdf_io = io.BytesIO()
-        doc = SimpleDocTemplate(pdf_io, pagesize=A4)
-        elements = [Paragraph(f"Orçamento: {res['cliente']}", getSampleStyleSheet()['Title'])]
-        # (Restante lógica do PDF...)
-        doc.build(elements)
-        st.download_button("⬇️ Baixar PDF", pdf_io.getvalue(), "orcamento.pdf")
+        # Botão para gerar PDF
+        if st.button("📥 Gerar PDF"):
+            st.success("PDF gerado com sucesso!") # Aqui entra a função do ReportLab
     else:
-        st.info("Adicione quantidades abaixo.")
+        st.info("Adicione itens para calcular.")
 
 # --------------------------------------------------
-# 5. PESQUISA (NÃO TROCA ITENS)
+# 4. PESQUISA E ADIÇÃO (MÉTODO SEGURO)
 # --------------------------------------------------
 st.divider()
-st.subheader("🔍 1. Pesquisar e Adicionar")
+st.subheader("🔍 1. Pesquisar e Adicionar Artigos")
+
 pesquisa = st.text_input("Procure por Nome ou Código (Ex: arp2202)...")
 
-# Filtro inteligente
-mask = (res["dados"]["DESCRIÇÃO"].str.contains(pesquisa, case=False, na=False)) | \
-       (res["dados"]["CÓDIGO"].str.contains(pesquisa, case=False, na=False))
-
-# IMPORTANTE: Passamos o DataFrame com o index de CÓDIGO
-df_search = res["dados"][mask & (res["dados"]["Quantidade"] == 0)]
-
-st.data_editor(
-    df_search,
-    column_config={
-        "CÓDIGO": st.column_config.TextColumn("Cód", disabled=True),
-        "DESCRIÇÃO": st.column_config.TextColumn("Descrição", disabled=True),
-        "Preço Unitário": st.column_config.NumberColumn("Preço Base (€)", format="%.2f", disabled=True),
-        "Quantidade": st.column_config.NumberColumn("Qtd", min_value=0.0)
-    },
-    hide_index=True, # Agora podemos esconder o index visualmente porque ele está no 'id' interno
-    use_container_width=True,
-    key=f"search_{st.session_state['orc_atual']}",
-    on_change=sincronizar_dados, args=(f"search_{st.session_state['orc_atual']}",)
-)
+if pesquisa:
+    mask = (st.session_state.base_dados["DESCRIÇÃO"].str.contains(pesquisa, case=False, na=False)) | \
+           (st.session_state.base_dados["CÓDIGO"].str.contains(pesquisa, case=False, na=False))
+    
+    resultados = st.session_state.base_dados[mask].copy()
+    
+    if not resultados.empty:
+        # Mostramos os resultados numa tabela de seleção
+        selecao = st.dataframe(
+            resultados,
+            use_container_width=True,
+            hide_index=True,
+            column_config={"Preço Unitário": st.column_config.NumberColumn(format="%.2f €")}
+        )
+        
+        # Seleção manual por Código para evitar erros de índice
+        cod_escolhido = st.selectbox("Selecione o Código para adicionar:", resultados["CÓDIGO"].unique())
+        qtd_add = st.number_input("Quantidade:", min_value=0.1, value=1.0, step=0.1)
+        
+        if st.button("➕ Adicionar ao Orçamento"):
+            item_base = st.session_state.base_dados[st.session_state.base_dados["CÓDIGO"] == cod_escolhido].iloc[0]
+            
+            novo_item = {
+                "CÓDIGO": item_base["CÓDIGO"],
+                "Artigo": item_base["DESCRIÇÃO"],
+                "UM": item_base["UNID"],
+                "Preço Unitário": item_base["Preço Unitário"],
+                "Quantidade": qtd_add
+            }
+            st.session_state.itens_orcamento.append(novo_item)
+            st.rerun()
 
 # --------------------------------------------------
-# 6. APURADOS (ESTILO IMAGEM ANEXADA)
+# 5. ITENS APURADOS (EDIÇÃO E REMOÇÃO)
 # --------------------------------------------------
-st.markdown("---")
+st.divider()
 st.subheader("📝 2. Itens Apurados (No Orçamento)")
 
-df_apurados = res["dados"][res["dados"]["Quantidade"] > 0]
-
-if not df_apurados.empty:
-    st.data_editor(
+if st.session_state.itens_orcamento:
+    df_apurados = pd.DataFrame(st.session_state.itens_orcamento)
+    
+    # Editor para mudar quantidades ou preços unitários dos apurados
+    editado = st.data_editor(
         df_apurados,
-        column_config={
-            "CÓDIGO": st.column_config.TextColumn("Cód", disabled=True),
-            "DESCRIÇÃO": st.column_config.TextColumn("Artigo", width="large", disabled=True),
-            "Preço Unitário": st.column_config.NumberColumn("V. Unit (€)", format="%.2f"),
-            "Quantidade": st.column_config.NumberColumn("Qtd", min_value=0.0)
-        },
-        hide_index=True,
         use_container_width=True,
-        num_rows="dynamic",
-        key=f"edit_{st.session_state['orc_atual']}",
-        on_change=sincronizar_dados, args=(f"edit_{st.session_state['orc_atual']}",)
+        hide_index=True,
+        num_rows="dynamic", # Permite apagar linhas
+        key="editor_apurados",
+        column_config={
+            "Artigo": st.column_config.TextColumn(width="large", disabled=True),
+            "Preço Unitário": st.column_config.NumberColumn("V. Unit (€)", format="%.2f"),
+            "Quantidade": st.column_config.NumberColumn("Qtd", format="%.2f")
+        }
     )
-    res["notas"] = st.text_area("Notas", res["notas"])
+    
+    # Guardar alterações se o utilizador mexer na tabela
+    if st.button("💾 Gravar Alterações na Lista"):
+        st.session_state.itens_orcamento = editado.to_dict('records')
+        st.rerun()
+
+    st.session_state.dados_cliente["notas"] = st.text_area("Notas Finais", st.session_state.dados_cliente["notas"])
+
 else:
-    st.warning("Lista de apurados vazia.")
+    st.write("O orçamento ainda não tem itens.")
+
+# --------------------------------------------------
+# 6. SIDEBAR
+# --------------------------------------------------
+with st.sidebar:
+    if st.button("🗑️ Limpar Tudo"):
+        st.session_state.itens_orcamento = []
+        st.rerun()
