@@ -22,7 +22,7 @@ if os.path.exists(LOGO_PATH):
     st.image(LOGO_PATH, width=250)
 
 # --------------------------------------------------
-# 2. Funções de Suporte
+# 2. Funções de Suporte e Salvamento
 # --------------------------------------------------
 def carregar_base_limpa():
     if os.path.exists(EXCEL_PATH):
@@ -36,6 +36,16 @@ def carregar_base_limpa():
         except:
             pass
     return pd.DataFrame(columns=["CÓDIGO", "DESCRIÇÃO", "UNID", "Preço Unitário", "Quantidade"])
+
+def salvar_edicoes():
+    """Função de salvamento instantâneo disparada pelo on_change"""
+    key = f"editor_{st.session_state['orc_atual']}"
+    if key in st.session_state:
+        edicoes = st.session_state[key]
+        # Aplicar as linhas editadas diretamente no estado global
+        for row_idx, alteracoes in edicoes["edited_rows"].items():
+            for col, val in alteracoes.items():
+                st.session_state["lista_orcamentos"][st.session_state["orc_atual"]]["dados"].at[row_idx, col] = val
 
 # --------------------------------------------------
 # 3. Gestão de Estado (Sessão)
@@ -52,7 +62,7 @@ if "lista_orcamentos" not in st.session_state:
 with st.sidebar:
     st.header("💾 Sistema de Backup")
     
-    # Exportar Rascunhos
+    # Exportar Backup
     estado_para_gravar = {
         "lista": st.session_state["lista_orcamentos"],
         "atual": st.session_state["orc_atual"]
@@ -61,10 +71,9 @@ with st.sidebar:
         label="📥 Guardar Rascunhos no PC",
         data=pickle.dumps(estado_para_gravar),
         file_name=f"backup_orcamentos_{date.today()}.pkl",
-        help="Baixa um ficheiro com todos os orçamentos para continuar noutro dia."
     )
     
-    # Restaurar Rascunhos
+    # Restaurar Backup
     arquivo_backup = st.file_uploader("📂 Abrir Backup do PC", type=["pkl"])
     if arquivo_backup:
         dados_restaurados = pickle.loads(arquivo_backup.read())
@@ -76,7 +85,7 @@ with st.sidebar:
     st.divider()
     st.header("📂 Alternar Orçamentos")
     opcoes = list(st.session_state["lista_orcamentos"].keys())
-    escolha = st.selectbox("Selecionar Trabalho:", opcoes, index=opcoes.index(st.session_state["orc_atual"]))
+    escolha = st.selectbox("Trabalho Ativo:", opcoes, index=opcoes.index(st.session_state["orc_atual"]))
     
     if escolha != st.session_state["orc_atual"]:
         st.session_state["orc_atual"] = escolha
@@ -107,22 +116,21 @@ with st.expander("➕ Adicionar item personalizado"):
     n_des = c2.text_input("Descrição")
     n_uni = c3.text_input("Unid")
     n_pre = c4.number_input("Preço Unit. (€)", min_value=0.0, format="%.2f")
-    if st.button("Inserir na Lista"):
+    if st.button("Inserir"):
         novo = pd.DataFrame([{"CÓDIGO": n_cod, "DESCRIÇÃO": n_des, "UNID": n_uni, "Preço Unitário": n_pre, "Quantidade": 0.0}])
         st.session_state["lista_orcamentos"][st.session_state["orc_atual"]]["dados"] = pd.concat([dados_atuais, novo], ignore_index=True)
         st.rerun()
 
-# Pesquisa e Edição
+# Pesquisa
 pesquisa = st.text_input("🔍 Pesquisar na base de dados...")
 mask = dados_atuais["DESCRIÇÃO"].str.contains(pesquisa, case=False, na=False) | \
        dados_atuais["CÓDIGO"].astype(str).str.contains(pesquisa, case=False, na=False)
 
+# Mostrar o que foi pesquisado OU o que já tem quantidade
 df_view = dados_atuais[mask | (dados_atuais["Quantidade"] > 0)].copy()
 
-# A chave dinâmica garante que o editor atualize após carregar o backup
-editor_key = f"editor_{st.session_state['orc_atual']}"
-
-edited_df = st.data_editor(
+# Tabela com Salvamento Instantâneo
+st.data_editor(
     df_view,
     column_config={
         "Preço Unitário": st.column_config.NumberColumn("Preço (€)", format="%.2f"),
@@ -130,21 +138,17 @@ edited_df = st.data_editor(
     },
     hide_index=True, 
     use_container_width=True,
-    key=editor_key
+    key=f"editor_{st.session_state['orc_atual']}",
+    on_change=salvar_edicoes
 )
 
-# Sincronização rigorosa com o estado global
-if edited_df is not None:
-    for idx in edited_df.index:
-        st.session_state["lista_orcamentos"][st.session_state["orc_atual"]]["dados"].at[idx, "Quantidade"] = edited_df.loc[idx, "Quantidade"]
-        st.session_state["lista_orcamentos"][st.session_state["orc_atual"]]["dados"].at[idx, "Preço Unitário"] = edited_df.loc[idx, "Preço Unitário"]
-
 st.divider()
-res["notas"] = st.text_area("📝 Notas / Observações do Orçamento", res["notas"])
+res["notas"] = st.text_area("📝 Notas / Observações", res["notas"])
 
 # --------------------------------------------------
-# 6. Totais e Exportação (PDF e Excel)
+# 6. Totais e Exportação
 # --------------------------------------------------
+# Recarregamos os dados atualizados para calcular totais
 itens_finais = st.session_state["lista_orcamentos"][st.session_state["orc_atual"]]["dados"].copy()
 itens_finais = itens_finais[itens_finais["Quantidade"] > 0]
 
@@ -159,7 +163,6 @@ if not itens_finais.empty:
     c2.metric(f"IVA ({iva_percent}%)", f"{valor_iva:,.2f} €")
     c3.subheader(f"TOTAL: {total_geral:,.2f} €")
 
-    st.write("### Gerar Documentos")
     col_pdf, col_xls = st.columns(2)
 
     with col_pdf:
@@ -211,4 +214,4 @@ if not itens_finais.empty:
             
         st.download_button("⬇️ Baixar Excel", output_ex.getvalue(), f"Orcamento_{res['cliente']}.xlsx")
 else:
-    st.info("Insira quantidades para desbloquear os botões de exportação.")
+    st.info("Insira quantidades para ver os totais e baixar os ficheiros.")
