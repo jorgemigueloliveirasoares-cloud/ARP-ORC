@@ -38,11 +38,9 @@ def carregar_base_limpa():
     return pd.DataFrame(columns=["CÓDIGO", "DESCRIÇÃO", "UNID", "Preço Unitário", "Quantidade"])
 
 def salvar_edicoes():
-    """Função de salvamento instantâneo disparada pelo on_change"""
     key = f"editor_{st.session_state['orc_atual']}"
     if key in st.session_state:
         edicoes = st.session_state[key]
-        # Aplicar as linhas editadas diretamente no estado global
         for row_idx, alteracoes in edicoes["edited_rows"].items():
             for col, val in alteracoes.items():
                 st.session_state["lista_orcamentos"][st.session_state["orc_atual"]]["dados"].at[row_idx, col] = val
@@ -52,28 +50,26 @@ def salvar_edicoes():
 # --------------------------------------------------
 if "lista_orcamentos" not in st.session_state:
     st.session_state["lista_orcamentos"] = {
-        "Orçamento 1": {"cliente": "", "obra": "", "notas": "", "dados": carregar_base_limpa()}
+        "Orçamento 1": {
+            "cliente": "", 
+            "morada": "", 
+            "telefone": "",
+            "obra": "", 
+            "data_visita": date.today(), 
+            "notas": "", 
+            "dados": carregar_base_limpa()
+        }
     }
     st.session_state["orc_atual"] = "Orçamento 1"
 
 # --------------------------------------------------
-# 4. Sidebar: Gestão de Sessões e Backup
+# 4. Sidebar: Gestão de Sessões e Dados do Cliente
 # --------------------------------------------------
 with st.sidebar:
     st.header("💾 Sistema de Backup")
+    estado_para_gravar = {"lista": st.session_state["lista_orcamentos"], "atual": st.session_state["orc_atual"]}
+    st.download_button(label="📥 Guardar Rascunhos no PC", data=pickle.dumps(estado_para_gravar), file_name=f"backup_orcamentos_{date.today()}.pkl")
     
-    # Exportar Backup
-    estado_para_gravar = {
-        "lista": st.session_state["lista_orcamentos"],
-        "atual": st.session_state["orc_atual"]
-    }
-    st.download_button(
-        label="📥 Guardar Rascunhos no PC",
-        data=pickle.dumps(estado_para_gravar),
-        file_name=f"backup_orcamentos_{date.today()}.pkl",
-    )
-    
-    # Restaurar Backup
     arquivo_backup = st.file_uploader("📂 Abrir Backup do PC", type=["pkl"])
     if arquivo_backup:
         dados_restaurados = pickle.loads(arquivo_backup.read())
@@ -93,23 +89,31 @@ with st.sidebar:
 
     if st.button("➕ Novo Orçamento"):
         novo_nome = f"Orçamento {len(st.session_state['lista_orcamentos']) + 1}"
-        st.session_state["lista_orcamentos"][novo_nome] = {"cliente": "", "obra": "", "notas": "", "dados": carregar_base_limpa()}
+        st.session_state["lista_orcamentos"][novo_nome] = {
+            "cliente": "", "morada": "", "telefone": "", "obra": "", "data_visita": date.today(), "notas": "", "dados": carregar_base_limpa()
+        }
         st.session_state["orc_atual"] = novo_nome
         st.rerun()
 
     st.divider()
+    st.header("📋 Informações Detalhadas")
     res = st.session_state["lista_orcamentos"][st.session_state["orc_atual"]]
-    res["cliente"] = st.text_input("Cliente", res["cliente"])
-    res["obra"] = st.text_input("Obra", res["obra"])
+    res["cliente"] = st.text_input("Nome do Cliente", res["cliente"])
+    res["telefone"] = st.text_input("Contacto / Telefone", res.get("telefone", ""))
+    res["morada"] = st.text_area("Morada do Cliente", res["morada"])
+    res["obra"] = st.text_input("Referência da Obra", res["obra"])
+    
+    if isinstance(res.get("data_visita"), str):
+        res["data_visita"] = date.fromisoformat(res["data_visita"])
+    res["data_visita"] = st.date_input("Data da Visita", res.get("data_visita", date.today()))
     iva_percent = st.selectbox("IVA (%)", [0, 6, 13, 23], index=3)
 
 # --------------------------------------------------
 # 5. Área de Trabalho Principal
 # --------------------------------------------------
-st.title(f"📐 Editando: {st.session_state['orc_atual']}")
+st.title(f"📐 {st.session_state['orc_atual']}")
 dados_atuais = st.session_state["lista_orcamentos"][st.session_state["orc_atual"]]["dados"]
 
-# Adicionar Item Manual
 with st.expander("➕ Adicionar item personalizado"):
     c1, c2, c3, c4 = st.columns([1, 3, 1, 1])
     n_cod = c1.text_input("Cód")
@@ -121,34 +125,29 @@ with st.expander("➕ Adicionar item personalizado"):
         st.session_state["lista_orcamentos"][st.session_state["orc_atual"]]["dados"] = pd.concat([dados_atuais, novo], ignore_index=True)
         st.rerun()
 
-# Pesquisa
 pesquisa = st.text_input("🔍 Pesquisar na base de dados...")
 mask = dados_atuais["DESCRIÇÃO"].str.contains(pesquisa, case=False, na=False) | \
        dados_atuais["CÓDIGO"].astype(str).str.contains(pesquisa, case=False, na=False)
 
-# Mostrar o que foi pesquisado OU o que já tem quantidade
 df_view = dados_atuais[mask | (dados_atuais["Quantidade"] > 0)].copy()
 
-# Tabela com Salvamento Instantâneo
 st.data_editor(
     df_view,
     column_config={
         "Preço Unitário": st.column_config.NumberColumn("Preço (€)", format="%.2f"),
         "Quantidade": st.column_config.NumberColumn("Qtd", min_value=0.0, step=0.1)
     },
-    hide_index=True, 
-    use_container_width=True,
+    hide_index=True, use_container_width=True,
     key=f"editor_{st.session_state['orc_atual']}",
     on_change=salvar_edicoes
 )
 
 st.divider()
-res["notas"] = st.text_area("📝 Notas / Observações", res["notas"])
+res["notas"] = st.text_area("📝 Notas / Observações do Orçamento", res["notas"])
 
 # --------------------------------------------------
 # 6. Totais e Exportação
 # --------------------------------------------------
-# Recarregamos os dados atualizados para calcular totais
 itens_finais = st.session_state["lista_orcamentos"][st.session_state["orc_atual"]]["dados"].copy()
 itens_finais = itens_finais[itens_finais["Quantidade"] > 0]
 
@@ -179,7 +178,11 @@ if not itens_finais.empty:
 
         title_st = ParagraphStyle('T', parent=styles['Title'], alignment=TA_CENTER)
         elements.append(Paragraph(f"ORÇAMENTO: {res['obra']}", title_st))
-        elements.append(Paragraph(f"<b>Cliente:</b> {res['cliente']} | <b>Data:</b> {date.today()}", styles['Normal']))
+        
+        # Cabeçalho Detalhado no PDF com Telefone
+        elements.append(Paragraph(f"<b>Cliente:</b> {res['cliente']} | <b>Telefone:</b> {res['telefone']}", styles['Normal']))
+        elements.append(Paragraph(f"<b>Morada:</b> {res['morada']}", styles['Normal']))
+        elements.append(Paragraph(f"<b>Data da Visita:</b> {res['data_visita']} | <b>Data de Emissão:</b> {date.today()}", styles['Normal']))
         elements.append(Spacer(1, 20))
 
         data = [["Cód", "Descrição", "Un", "Qtd", "Preço", "Total"]]
@@ -209,9 +212,15 @@ if not itens_finais.empty:
         output_ex = io.BytesIO()
         with pd.ExcelWriter(output_ex, engine='xlsxwriter') as writer:
             itens_finais.to_excel(writer, index=False, sheet_name='Itens')
-            df_resumo = pd.DataFrame([{"Cliente": res["cliente"], "Obra": res["obra"], "Total": total_geral, "Notas": res["notas"]}])
+            df_resumo = pd.DataFrame([{
+                "Cliente": res["cliente"], 
+                "Telefone": res["telefone"],
+                "Morada": res["morada"],
+                "Obra": res["obra"], 
+                "Data Visita": res["data_visita"],
+                "Total": total_geral, 
+                "Notas": res["notas"]
+            }])
             df_resumo.to_excel(writer, index=False, sheet_name='Resumo')
             
         st.download_button("⬇️ Baixar Excel", output_ex.getvalue(), f"Orcamento_{res['cliente']}.xlsx")
-else:
-    st.info("Insira quantidades para ver os totais e baixar os ficheiros.")
