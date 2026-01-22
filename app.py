@@ -12,8 +12,8 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 
-# 1. CONFIGURAÇÃO
-st.set_page_config(page_title="Gestor de Orçamentos Pro", layout="wide")
+# 1. CONFIGURAÇÃO INICIAL
+st.set_page_config(page_title="Orçamentador Pro", layout="wide")
 
 @st.cache_data
 def carregar_base():
@@ -26,7 +26,6 @@ def carregar_base():
             df = df[["CÓDIGO", "DESCRIÇÃO", "UNID", col_preco]].dropna(subset=["CÓDIGO"])
             df.rename(columns={col_preco: "Preço Unitário"}, inplace=True)
             df["CÓDIGO"] = df["CÓDIGO"].astype(str).str.strip()
-            df["DESCRIÇÃO"] = df["DESCRIÇÃO"].astype(str).str.strip()
             return df
         except: pass
     return pd.DataFrame(columns=["CÓDIGO", "DESCRIÇÃO", "UNID", "Preço Unitário"])
@@ -34,29 +33,47 @@ def carregar_base():
 if "itens_orcamento" not in st.session_state:
     st.session_state.itens_orcamento = pd.DataFrame(columns=["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"])
 
-# 2. CABEÇALHO
+# 2. CABEÇALHO E DADOS DO CLIENTE
 col_log, col_cli, col_rasc = st.columns([1.2, 2.5, 1.2])
+
 with col_log:
     if os.path.exists("logo.png"): st.image("logo.png", width=180)
+
 with col_cli:
-    nome_cli = st.text_input("Nome do Cliente")
-    morada_cli = st.text_input("Morada")
-    tel_cli = st.text_input("Telefone")
-    obs_cli = st.text_area("Notas / Observações")
+    st.subheader("📋 Dados do Cliente")
+    nome_cli = st.text_input("Nome do Cliente", key="nome_cli")
+    morada_cli = st.text_input("Morada", key="morada_cli")
+    c1, c2 = st.columns(2)
+    tel_cli = c1.text_input("Telefone", key="tel_cli")
+    email_cli = c2.text_input("Email do Cliente", key="email_cli")
+    obs_cli = st.text_area("Notas / Observações", key="obs_cli")
+
 with col_rasc:
+    st.subheader("💾 Backup / Rascunho")
     n_orc = st.text_input("Nº Orçamento", value=f"ORC-{date.today().year}-001")
-    # Botão de rascunho simplificado
-    dados_rasc = {"cliente": {"nome": nome_cli, "obs": obs_cli}, "itens": st.session_state.itens_orcamento.to_dict(orient="records")}
-    st.download_button("💾 Guardar Rascunho", data=json.dumps(dados_rasc), file_name="rascunho.json")
+    
+    # Gerar ficheiro de Backup (JSON)
+    dados_backup = {
+        "cliente": {"nome": nome_cli, "morada": morada_cli, "tel": tel_cli, "email": email_cli, "obs": obs_cli, "n_orc": n_orc},
+        "itens": st.session_state.itens_orcamento.to_dict(orient="records")
+    }
+    st.download_button("📥 Guardar Backup", data=json.dumps(dados_backup), file_name=f"backup_{n_orc}.json", use_container_width=True)
+    
+    # Upload de Backup
+    u_backup = st.file_uploader("📂 Upload de Backup", type="json", label_visibility="collapsed")
+    if u_backup:
+        carregados = json.load(u_backup)
+        st.session_state.itens_orcamento = pd.DataFrame(carregados["itens"])
+        st.success("Dados carregados!")
 
 st.divider()
 
-# 3. ADIÇÃO DE ITENS (CORREÇÃO DO ERRO DE QTD)
+# 3. ADIÇÃO DE ITENS
 st.subheader("🔍 1. Adicionar Itens")
-tab1, tab2 = st.tabs(["🔎 Excel", "➕ Manual"])
+tab1, tab2 = st.tabs(["🔎 Pesquisar Excel", "➕ Manual"])
 
 with tab1:
-    termo = st.text_input("Pesquisar Artigo:", key="search_input").strip()
+    termo = st.text_input("Pesquisar:", key="search").strip()
     if termo:
         base = carregar_base()
         res = base[(base["DESCRIÇÃO"].str.contains(termo, case=False)) | (base["CÓDIGO"].str.contains(termo, case=False))].head(10)
@@ -65,82 +82,92 @@ with tab1:
             c1.write(row["CÓDIGO"])
             c2.write(row["DESCRIÇÃO"])
             c3.write(f"{row['Preço Unitário']:.2f}€")
-            # Campo de quantidade
-            qtd_input = c4.text_input("Qtd", key=f"input_{row['CÓDIGO']}", label_visibility="collapsed")
-            # O botão só processa se for clicado
-            if c5.button("➕", key=f"btn_{row['CÓDIGO']}"):
-                if qtd_input:
+            qtd_in = c4.text_input("Qtd", key=f"q_{row['CÓDIGO']}", label_visibility="collapsed")
+            if c5.button("➕", key=f"b_{row['CÓDIGO']}"):
+                if qtd_in:
                     try:
-                        v = float(qtd_input.replace(',', '.'))
-                        if v > 0:
-                            novo = pd.DataFrame([{"CÓDIGO": row["CÓDIGO"], "Artigo": row["DESCRIÇÃO"], "UNID": row["UNID"], "Preço Unitário": row["Preço Unitário"], "Quantidade": v}])
-                            st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
-                            st.rerun()
-                    except ValueError:
-                        st.error(f"Erro: '{qtd_input}' não é um número válido.")
-                else:
-                    st.warning("Insira uma quantidade primeiro.")
+                        v = float(qtd_in.replace(',', '.'))
+                        novo = pd.DataFrame([{"CÓDIGO": row["CÓDIGO"], "Artigo": row["DESCRIÇÃO"], "UNID": row["UNID"], "Preço Unitário": row["Preço Unitário"], "Quantidade": v}])
+                        st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
+                        st.rerun()
+                    except: st.error("Qtd inválida")
 
 with tab2:
-    m1, m2, m3, m4, m5 = st.columns([1, 3, 1, 1, 1])
-    m_desc = m2.text_input("Descrição Manual")
-    m_prec = m3.number_input("Preço €", min_value=0.0)
-    m_qtd = m4.number_input("Qtd", min_value=0.0)
-    if m5.button("Adicionar"):
+    m1, m2, m3, m4 = st.columns([3, 1, 1, 1])
+    m_desc = m1.text_input("Descrição Manual")
+    m_prec = m2.number_input("Preço €", min_value=0.0)
+    m_qtd = m3.number_input("Qtd", min_value=0.0)
+    if m4.button("Adicionar"):
         if m_desc and m_qtd > 0:
             nm = pd.DataFrame([{"CÓDIGO": "EXTRA", "Artigo": m_desc, "UNID": "un", "Preço Unitário": m_prec, "Quantidade": m_qtd}])
             st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, nm], ignore_index=True)
             st.rerun()
 
-# 4. TABELA E PDF
+# 4. TABELA FINAL E EXPORTAÇÕES
 st.divider()
 if not st.session_state.itens_orcamento.empty:
     df_final = st.session_state.itens_orcamento.copy()
     df_final["Subtotal"] = df_final["Quantidade"] * df_final["Preço Unitário"]
     st.data_editor(df_final, use_container_width=True, hide_index=True)
     total_val = df_final["Subtotal"].sum()
-    st.write(f"### Total: {total_val:.2f}€")
+    st.write(f"### Total: {total_val:,.2f}€")
 
-    def criar_pdf_corrigido(df, total):
+    # FUNÇÃO PDF SEM O CÓDIGO DO ARTIGO
+    def criar_pdf(df, total):
         buf = io.BytesIO()
-        doc = SimpleDocTemplate(buf, pagesize=A4)
+        doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20)
         sty = getSampleStyleSheet()
         elems = []
+        
         if os.path.exists("logo.png"):
             img = RLImage("logo.png", width=1.5*inch, height=0.8*inch)
             img.hAlign = 'LEFT'
             elems.append(img)
+            
+        elems.append(Paragraph(f"ORÇAMENTO: {n_orc}", sty['Title']))
+        elems.append(Spacer(1, 10))
         
-        elems.append(Paragraph(f"ORCAMENTO: {n_orc}", sty['Title']))
+        # Dados do Cliente no PDF
+        cli_info = f"<b>Cliente:</b> {nome_cli}<br/><b>Morada:</b> {morada_cli}<br/><b>Tel:</b> {tel_cli}<br/><b>Email:</b> {email_cli}"
+        elems.append(Paragraph(cli_info, sty['Normal']))
         elems.append(Spacer(1, 20))
         
-        # TABELA SEM TAGS HTML (CORREÇÃO DO ERRO DO TOTAL)
-        data = [["Cód", "Artigo", "Qtd", "Preço", "Total"]]
+        # Tabela (Removido o Código do Artigo)
+        data = [["Artigo / Descrição", "Qtd", "Unid", "Preço Unit.", "Total"]]
         for _, r in df.iterrows():
-            data.append([r['CÓDIGO'], r['Artigo'][:50], r['Quantidade'], f"{r['Preço Unitário']:.2f}€", f"{r['Subtotal']:.2f}€"])
+            data.append([r['Artigo'][:65], r['Quantidade'], r['UNID'], f"{r['Preço Unitário']:.2f}€", f"{r['Subtotal']:.2f}€"])
         
-        # Linha do Total limpa
-        data.append(["", "", "", "TOTAL:", f"{total:.2f}€"])
+        data.append(["", "", "", "TOTAL:", f"{total:,.2f}€"])
         
-        t = Table(data, colWidths=[60, 260, 40, 60, 70])
+        t = Table(data, colWidths=[280, 40, 40, 70, 70])
         t.setStyle(TableStyle([
             ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
             ('BACKGROUND', (0,0), (-1,0), colors.whitesmoke),
-            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'), # Negrito no cabeçalho
-            ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'), # Negrito na linha do TOTAL
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
             ('BACKGROUND', (0,-1), (-1,-1), colors.lightgrey),
-            ('ALIGN', (2,0), (-1,-1), 'CENTER'),
+            ('ALIGN', (1,0), (-1,-1), 'CENTER'),
         ]))
         elems.append(t)
         
         if obs_cli:
             elems.append(Spacer(1, 20))
-            elems.append(Paragraph(f"Observações: {obs_cli}", sty['Normal']))
+            elems.append(Paragraph(f"<b>Observações:</b><br/>{obs_cli}", sty['Normal']))
             
         doc.build(elems)
         return buf.getvalue()
 
-    st.download_button("📥 Baixar PDF", data=criar_pdf_corrigido(df_final, total_val), file_name="orcamento.pdf")
-    if st.button("🗑️ Limpar"):
+    c_pdf, c_xls, c_limp = st.columns(3)
+    
+    # Botão PDF
+    c_pdf.download_button("📥 Baixar PDF", data=criar_pdf(df_final, total_val), file_name=f"{n_orc}.pdf", use_container_width=True)
+    
+    # Botão Excel
+    buf_x = io.BytesIO()
+    with pd.ExcelWriter(buf_x, engine='xlsxwriter') as wr:
+        df_final.to_excel(wr, index=False)
+    c_xls.download_button("📊 Baixar Excel", data=buf_x.getvalue(), file_name=f"{n_orc}.xlsx", use_container_width=True)
+
+    if c_limp.button("🗑️ Limpar Tudo", use_container_width=True):
         st.session_state.itens_orcamento = pd.DataFrame(columns=["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"])
         st.rerun()
