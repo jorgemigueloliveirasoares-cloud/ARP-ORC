@@ -15,12 +15,10 @@ from reportlab.lib.units import inch
 # 1. CONFIGURAÇÃO INICIAL
 st.set_page_config(page_title="Orçamentador Pro", layout="wide")
 
-# Cor institucional (Azul do Logo)
 AZUL_LOGO = colors.Color(0/255, 115/255, 180/255) 
 
 @st.cache_data(ttl=600)
 def carregar_base():
-    # Caminho do ficheiro (ajustado para o nome que forneceste)
     caminho = "Cópia de Preços Tabela atual.xlsx"
     if os.path.exists(caminho):
         try:
@@ -74,26 +72,36 @@ with col_rasc:
 
 st.divider()
 
-# 3. ADIÇÃO DE ITENS
+# 3. ADIÇÃO DE ITENS (LAYOUT ATUALIZADO)
 st.subheader("🔍 1. Adicionar Itens")
 base = carregar_base()
 lista_artigos = base.apply(lambda x: f"{x['CÓDIGO']} - {x['DESCRIÇÃO']}", axis=1).tolist()
 
-col_pesq, col_qtd, col_btn = st.columns([3, 0.8, 1])
+# Criamos as colunas para o seletor e para os campos de visualização
+c_sel, c_uni, c_pre, c_qtd, c_add = st.columns([2.5, 0.6, 0.8, 0.6, 0.8])
 
-with col_pesq:
-    escolha = st.selectbox("Pesquise o código ou nome do artigo:", options=[""] + lista_artigos, index=0)
-    
-    # SUGESTÃO IMPLEMENTADA: Visualização prévia antes de adicionar
-    if escolha:
-        cod_preview = escolha.split(" - ")[0]
-        row_preview = base[base["CÓDIGO"] == cod_preview].iloc[0]
-        st.info(f"**Info do Item:** Unidade: `{row_preview['UNID']}` | Preço Base: `{row_preview['Preço Unitário']:.2f}€`", icon="💡")
+with c_sel:
+    escolha = st.selectbox("Artigo:", options=[""] + lista_artigos, index=0)
 
-with col_qtd:
+# Lógica para extrair dados do item selecionado
+unidade_ver = ""
+preco_ver = 0.0
+if escolha:
+    cod_temp = escolha.split(" - ")[0]
+    row_temp = base[base["CÓDIGO"] == cod_temp].iloc[0]
+    unidade_ver = str(row_temp["UNID"])
+    preco_ver = float(row_temp["Preço Unitário"])
+
+with c_uni:
+    st.text_input("Unid.", value=unidade_ver, disabled=True)
+
+with c_pre:
+    st.text_input("Preço Unit.", value=f"{preco_ver:.2f} €" if escolha else "", disabled=True)
+
+with c_qtd:
     qtd_val = st.number_input("Qtd", min_value=0.01, value=1.0, step=0.5)
 
-with col_btn:
+with c_add:
     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
     btn_add = st.button("✅ Adicionar", use_container_width=True)
 
@@ -129,7 +137,7 @@ if not st.session_state.itens_orcamento.empty:
             "Quantidade": st.column_config.NumberColumn("Quantidade", format="%.2f"),
         },
         use_container_width=True, hide_index=True,
-        num_rows="dynamic" # Permite apagar linhas diretamente na tabela
+        num_rows="dynamic"
     )
     
     st.session_state.itens_orcamento = df_editado[["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"]]
@@ -158,14 +166,11 @@ if not st.session_state.itens_orcamento.empty:
         elems.append(Paragraph(cli_info, sty['Normal']))
         elems.append(Spacer(1, 15))
         
-        # TABELA PRINCIPAL
         data = [["Artigo / Descrição", "Qtd", "Unid", "Preço Unit.", "Total"]]
         for _, r in df.iterrows():
             data.append([Paragraph(str(r['Artigo']), est_tab), f"{r['Quantidade']:.2f}", r['UNID'], f"{r['Preço Unitário']:.2f}€", f"{r['Subtotal']:.2f}€"])
         
         num_itens = len(df)
-        
-        # LINHAS DE TOTAIS
         data.append(["", "", "", "SUBTOTAL:", f"{sub:,.2f}€"])
         data.append(["", "", "", f"IVA ({taxa}%):", f"{iva_v:,.2f}€"])
         data.append(["", "", "", "TOTAL FINAL:", f"{total_f:,.2f}€"])
@@ -182,8 +187,6 @@ if not st.session_state.itens_orcamento.empty:
             ('GRID', (0,0), (-1, num_itens), 0.5, colors.grey),
             ('FONTNAME', (3, num_itens+1), (3, -1), 'Helvetica-Bold'),
             ('FONTSIZE', (3, num_itens+1), (-1, -1), 9),
-            ('BOTTOMPADDING', (0, num_itens+1), (-1, -1), 5),
-            ('TOPPADDING', (0, num_itens+1), (-1, -1), 5),
             ('BACKGROUND', (3, -1), (4, -1), colors.lightgrey),
             ('BOX', (3, -1), (4, -1), 1, colors.black),
         ]
@@ -198,9 +201,8 @@ if not st.session_state.itens_orcamento.empty:
         doc.build(elems)
         return buf.getvalue()
 
-    # Botões de Exportação
     c1, c2, c3 = st.columns(3)
-    c1.download_button("📥 Baixar PDF Corrigido", data=criar_pdf(df_editado, sub_val, iva_val, total_val, taxa_iva), file_name=f"{n_orc}.pdf", use_container_width=True)
+    c1.download_button("📥 Baixar PDF", data=criar_pdf(df_editado, sub_val, iva_val, total_val, taxa_iva), file_name=f"{n_orc}.pdf", use_container_width=True)
     
     buf_x = io.BytesIO()
     with pd.ExcelWriter(buf_x, engine='xlsxwriter') as wr:
