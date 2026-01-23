@@ -36,7 +36,7 @@ def carregar_base():
 if "itens_orcamento" not in st.session_state:
     st.session_state.itens_orcamento = pd.DataFrame(columns=["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"])
 
-# 2. CABEÇALHO E DADOS DO CLIENTE
+# 2. CABEÇALHO
 col_log, col_cli, col_rasc = st.columns([1.2, 2.5, 1.2])
 with col_log:
     if os.path.exists("logo.png"): st.image("logo.png", width=180)
@@ -44,154 +44,92 @@ with col_cli:
     st.subheader("📋 Dados do Cliente")
     nome_cli = st.text_input("Nome do Cliente")
     morada_cli = st.text_input("Morada")
-    c1, c2 = st.columns(2)
-    tel_cli = c1.text_input("Telefone")
-    email_cli = c2.text_input("Email")
+    tel_cli = st.text_input("Telefone/Email")
 with col_rasc:
-    st.subheader("💾 Sistema")
     n_orc = st.text_input("Nº Orçamento", value=f"ORC-{date.today().year}-001")
-    dados_backup = {"cliente": {"nome": nome_cli, "n_orc": n_orc}, "itens": st.session_state.itens_orcamento.to_dict(orient="records")}
-    st.download_button("📥 Exportar JSON", data=json.dumps(dados_backup), file_name=f"{n_orc}.json", use_container_width=True)
 
 st.divider()
 
-# 3. ADIÇÃO DE ITENS (CORREÇÃO DA OPÇÃO A)
+# 3. ADIÇÃO DE ITENS (LÓGICA CORRIGIDA)
 st.subheader("🔍 1. Adicionar Itens")
 base = carregar_base()
 lista_artigos = base.apply(lambda x: f"{x['CÓDIGO']} - {x['DESCRIÇÃO']}", axis=1).tolist()
 
-with st.form("form_adicao", clear_on_submit=True):
-    # --- OPÇÃO A: SELEÇÃO DA TABELA ---
-    st.markdown("**Opção A: Selecionar da Tabela de Preços**")
-    col_pesq, col_unid_t, col_prec_t, col_qtd_t = st.columns([2, 0.5, 0.7, 0.6])
-    
-    with col_pesq:
-        # A seleção dispara a atualização dos campos abaixo
-        escolha = st.selectbox("Pesquise o código ou nome do artigo:", options=[""] + lista_artigos, index=0)
-    
-    # Lógica para extrair dados da tabela com base na escolha
-    unid_auto = ""
-    preco_auto = 0.0
+# --- OPÇÃO A: FORA DO FORMULÁRIO PARA ATUALIZAÇÃO IMEDIATA ---
+st.markdown("### **Opção A: Selecionar da Tabela de Preços**")
+col_pesq, col_unid_t, col_prec_t, col_qtd_t = st.columns([2, 0.5, 0.7, 0.6])
+
+with col_pesq:
+    escolha = st.selectbox("Pesquise o código ou nome do artigo:", options=[""] + lista_artigos, index=0, key="sel_tabela")
+
+# Procurar dados assim que a escolha muda
+u_val, p_val = "", 0.0
+if escolha:
+    c_cod = escolha.split(" - ")[0]
+    match = base[base["CÓDIGO"] == c_cod].iloc[0]
+    u_val = str(match["UNID"])
+    p_val = float(match["Preço Unitário"])
+
+with col_unid_t:
+    st.text_input("Unid", value=u_val, disabled=True, key="u_disp")
+with col_prec_t:
+    st.number_input("Preço Unit. €", value=p_val, disabled=True, format="%.2f", key="p_disp")
+with col_qtd_t:
+    qtd_a = st.number_input("Qtd", min_value=0.01, value=1.0, key="q_a")
+
+if st.button("✅ Adicionar Item Selecionado", use_container_width=True):
     if escolha:
-        codigo_selecionado = escolha.split(" - ")[0]
-        dados_item = base[base["CÓDIGO"] == codigo_selecionado].iloc[0]
-        unid_auto = str(dados_item["UNID"])
-        preco_auto = float(dados_item["Preço Unitário"])
+        novo = pd.DataFrame([{"CÓDIGO": c_cod, "Artigo": escolha.split(" - ", 1)[1], "UNID": u_val, "Preço Unitário": p_val, "Quantidade": qtd_a}])
+        st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
+        st.rerun()
 
-    with col_unid_t:
-        # Mostra a unidade da tabela (bloqueado para edição para manter integridade)
-        st.text_input("Unid (Tabela)", value=unid_auto, disabled=True, key="ut_show")
-    with col_prec_t:
-        # Mostra o preço da tabela
-        st.number_input("Preço Unit. €", value=preco_auto, disabled=True, format="%.2f", key="pt_show")
-    with col_qtd_t:
-        qtd_tab = st.number_input("Qtd", min_value=0.01, value=1.0, key="qtd_t_input")
+st.markdown("---")
 
-    add_tab = st.form_submit_button("✅ Adicionar da Tabela", use_container_width=True)
-
-    st.markdown("---")
-
-    # --- OPÇÃO B: ITEM MANUAL ---
-    st.markdown("**Opção B: Adicionar Item Manual (Extra)**")
-    col_desc_man, col_unid_man, col_prec_man, col_qtd_man = st.columns([2, 0.5, 0.7, 0.6])
-    with col_desc_man:
-        item_manual = st.text_input("Descrição do Item Novo:", placeholder="Ex: Pintura de teto...")
-    with col_unid_man:
-        unid_man = st.text_input("Unid", value="un", key="u_man_input")
-    with col_prec_man:
-        prec_man = st.number_input("Preço €", min_value=0.0, value=0.0, step=0.01, format="%.2f", key="p_man_input")
-    with col_qtd_man:
-        qtd_man = st.number_input("Qtd", min_value=0.01, value=1.0, key="q_man_input")
+# --- OPÇÃO B: MANUAL (DENTRO DE FORMULÁRIO PARA O ENTER FUNCIONAR) ---
+st.markdown("### **Opção B: Adicionar Item Manual**")
+with st.form("form_manual", clear_on_submit=True):
+    col_desc_m, col_unid_m, col_prec_m, col_qtd_m = st.columns([2, 0.5, 0.7, 0.6])
+    with col_desc_m:
+        item_m = st.text_input("Descrição do Item Novo:", placeholder="Escreva aqui...")
+    with col_unid_m:
+        unid_m = st.text_input("Unid", value="un")
+    with col_prec_m:
+        prec_m = st.number_input("Preço €", min_value=0.0, step=0.01, format="%.2f")
+    with col_qtd_m:
+        qtd_m = st.number_input("Qtd", min_value=0.01, value=1.0)
     
-    add_man = st.form_submit_button("➕ Adicionar Item Manual", use_container_width=True)
+    if st.form_submit_button("➕ Adicionar Manual (ou Enter)", use_container_width=True):
+        if item_m:
+            novo_m = pd.DataFrame([{"CÓDIGO": "MANUAL", "Artigo": item_m, "UNID": unid_m, "Preço Unitário": prec_m, "Quantidade": qtd_m}])
+            st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo_m], ignore_index=True)
+            st.rerun()
 
-    # Processamento das adições
-    if add_tab and escolha:
-        st.session_state.itens_orcamento = pd.concat([
-            st.session_state.itens_orcamento, 
-            pd.DataFrame([{
-                "CÓDIGO": codigo_selecionado,
-                "Artigo": escolha.split(" - ", 1)[1],
-                "UNID": unid_auto,
-                "Preço Unitário": preco_auto,
-                "Quantidade": qtd_tab
-            }])
-        ], ignore_index=True)
-        st.rerun()
-
-    if add_man and item_manual:
-        st.session_state.itens_orcamento = pd.concat([
-            st.session_state.itens_orcamento, 
-            pd.DataFrame([{
-                "CÓDIGO": "MANUAL",
-                "Artigo": item_manual,
-                "UNID": unid_man,
-                "Preço Unitário": prec_man,
-                "Quantidade": qtd_man
-            }])
-        ], ignore_index=True)
-        st.rerun()
-
-# 4. TABELA DE RESUMO E PDF
+# 4. RESUMO E PDF
 st.divider()
 if not st.session_state.itens_orcamento.empty:
-    st.markdown("### 📋 Resumo do Orçamento")
-    col_iva, _ = st.columns([1, 4])
-    taxa_iva = col_iva.selectbox("Taxa de IVA:", [23, 13, 6, 0], format_func=lambda x: f"{x}%" if x > 0 else "Isento")
-
+    st.markdown("### 📋 Resumo")
     df_calc = st.session_state.itens_orcamento.copy()
     df_calc["Subtotal"] = df_calc["Quantidade"] * df_calc["Preço Unitário"]
     
     df_editado = st.data_editor(df_calc, use_container_width=True, hide_index=True)
     st.session_state.itens_orcamento = df_editado[["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"]]
     
-    sub_total = df_editado["Subtotal"].sum()
-    v_iva = sub_total * (taxa_iva / 100)
-    total_g = sub_total + v_iva
+    total = df_editado["Subtotal"].sum()
+    st.metric("TOTAL ORÇAMENTO", f"{total:,.2f}€")
 
-    c_t1, c_t2, c_t3 = st.columns(3)
-    c_t1.metric("Subtotal", f"{sub_total:,.2f}€")
-    c_t2.metric(f"IVA ({taxa_iva}%)", f"{v_iva:,.2f}€")
-    c_t3.metric("TOTAL", f"{total_g:,.2f}€")
-
-    def gerar_pdf(df, sub, iva, tot, tx):
+    # Botão PDF Simples
+    def gerar_pdf(df, tot):
         buf = io.BytesIO()
-        doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20)
-        sty = getSampleStyleSheet()
-        elems = []
-        if os.path.exists("logo.png"):
-            img = RLImage("logo.png", width=1.5*inch, height=0.8*inch)
-            img.hAlign = 'LEFT'
-            elems.append(img)
-        elems.append(Paragraph(f"ORÇAMENTO: {n_orc}", sty['Title']))
-        elems.append(Spacer(1, 15))
-        elems.append(Paragraph(f"<b>Cliente:</b> {nome_cli}<br/><b>Morada:</b> {morada_cli}", sty['Normal']))
-        elems.append(Spacer(1, 15))
-        
-        data = [["Descrição", "Qtd", "Unid", "Preço Unit.", "Total"]]
+        doc = SimpleDocTemplate(buf, pagesize=A4)
+        elems = [Paragraph(f"ORÇAMENTO: {n_orc}", getSampleStyleSheet()['Title']), Spacer(1, 12)]
+        data = [["Artigo", "Qtd", "Unid", "Preço", "Total"]]
         for _, r in df.iterrows():
-            data.append([Paragraph(r['Artigo'], sty['Normal']), f"{r['Quantidade']:.2f}", r['UNID'], f"{r['Preço Unitário']:.2f}€", f"{(r['Quantidade']*r['Preço Unitário']):.2f}€"])
-        
-        num_itens = len(df)
-        data.append(["", "", "", "SUBTOTAL:", f"{sub:,.2f}€"])
-        data.append(["", "", "", f"IVA ({tx}%):", f"{iva:,.2f}€"])
-        data.append(["", "", "", "TOTAL FINAL:", f"{tot:,.2f}€"])
-        
-        t = Table(data, colWidths=[280, 45, 45, 75, 75])
-        t.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), AZUL_LOGO),
-            ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-            ('ALIGN', (3,0), (4,-1), 'RIGHT'),
-            ('GRID', (0,0), (-1, num_itens), 0.5, colors.grey),
-            ('FONTNAME', (3, num_itens+1), (3, -1), 'Helvetica-Bold'),
-            ('BACKGROUND', (3,-1), (4,-1), colors.lightgrey),
-        ]))
+            data.append([r['Artigo'][:50], r['Quantidade'], r['UNID'], f"{r['Preço Unitário']}€", f"{(r['Quantidade']*r['Preço Unitário']):.2f}€"])
+        data.append(["", "", "", "TOTAL:", f"{tot:.2f}€"])
+        t = Table(data, colWidths=[250, 40, 40, 70, 70])
+        t.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.grey), ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke), ('GRID', (0,0), (-1,-1), 0.5, colors.grey)]))
         elems.append(t)
         doc.build(elems)
         return buf.getvalue()
 
-    c_b1, c_b2, c_b3 = st.columns(3)
-    c_b1.download_button("📥 Baixar PDF Profissional", data=gerar_pdf(df_editado, sub_total, v_iva, total_g, taxa_iva), file_name=f"{n_orc}.pdf", use_container_width=True)
-    if c_b3.button("🗑️ Limpar Tudo", use_container_width=True):
-        st.session_state.itens_orcamento = pd.DataFrame(columns=["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"])
-        st.rerun()
+    st.download_button("📥 Baixar PDF", data=gerar_pdf(df_editado, total), file_name=f"{n_orc}.pdf", use_container_width=True)
