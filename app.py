@@ -55,39 +55,40 @@ with col_rasc:
 
 st.divider()
 
-# 3. ADIÇÃO DE ITENS COM SUPORTE A "ENTER" (FORMULÁRIO)
+# 3. ADIÇÃO DE ITENS (LAYOUT CORRIGIDO)
 st.subheader("🔍 1. Adicionar Itens")
 base = carregar_base()
 lista_artigos = base.apply(lambda x: f"{x['CÓDIGO']} - {x['DESCRIÇÃO']}", axis=1).tolist()
 
-# Criamos um formulário para que o "Enter" funcione em qualquer campo
 with st.form("form_adicao", clear_on_submit=True):
+    # Primeira linha: Pesquisa na tabela e campos de suporte
     col_pesq, col_unid, col_prec, col_qtd = st.columns([2.5, 0.5, 0.7, 0.6])
     
     with col_pesq:
         escolha = st.selectbox("Pesquise na tabela:", options=[""] + lista_artigos, index=0)
-        item_manual = st.text_input("Ou descreva um item novo (Enter para adicionar):", key="manual_txt")
+    
+    # Detetar valores padrão se algo for selecionado na lista
+    unid_val = "un"
+    preco_val = 0.0
+    if escolha:
+        cod_sel = escolha.split(" - ")[0]
+        unid_val = str(base[base["CÓDIGO"] == cod_sel]["UNID"].values[0])
+        preco_val = float(base[base["CÓDIGO"] == cod_sel]["Preço Unitário"].values[0])
 
     with col_unid:
-        # Tenta detetar a unidade se houver escolha na lista
-        unid_padrao = "un"
-        if escolha:
-            cod_sel = escolha.split(" - ")[0]
-            unid_padrao = str(base[base["CÓDIGO"] == cod_sel]["UNID"].values[0])
-        unid_input = st.text_input("Unid", value=unid_padrao)
-
+        unid_input = st.text_input("Unid", value=unid_val)
     with col_prec:
-        preco_padrao = 0.0
-        if escolha:
-            cod_sel = escolha.split(" - ")[0]
-            preco_padrao = float(base[base["CÓDIGO"] == cod_sel]["Preço Unitário"].values[0])
-        preco_input = st.number_input("Preço €", min_value=0.0, value=preco_padrao, step=0.01, format="%.2f")
-
+        preco_input = st.number_input("Preço €", min_value=0.0, value=preco_val, step=0.01, format="%.2f")
     with col_qtd:
         qtd_input = st.number_input("Qtd", min_value=0.01, value=1.0)
 
-    # O botão de submissão do formulário
-    add_click = st.form_submit_button("✅ Adicionar ao Orçamento", use_container_width=True)
+    # Segunda linha: Item manual e botão (Alinhados para suporte ao Enter)
+    col_man, col_btn = st.columns([3.7, 1])
+    with col_man:
+        item_manual = st.text_input("Ou escreva um item novo aqui (Enter para adicionar):", placeholder="Ex: Pintura de teto da sala")
+    with col_btn:
+        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+        add_click = st.form_submit_button("✅ Adicionar", use_container_width=True)
 
     if add_click:
         desc_final = ""
@@ -111,19 +112,19 @@ with st.form("form_adicao", clear_on_submit=True):
             st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo_item], ignore_index=True)
             st.rerun()
         else:
-            st.error("Selecione um item ou escreva uma descrição.")
+            st.error("Por favor, selecione um artigo ou descreva um item novo.")
 
-# 4. RESUMO, IVA E PDF (Mantendo o estilo institucional)
+# 4. RESUMO E PDF
 st.divider()
 if not st.session_state.itens_orcamento.empty:
     st.markdown("### 📋 Resumo")
     col_iva, _ = st.columns([1, 4])
     taxa_iva = col_iva.selectbox("IVA:", [23, 13, 6, 0], format_func=lambda x: f"{x}%" if x > 0 else "Isento")
 
-    df_final = st.session_state.itens_orcamento.copy()
-    df_final["Subtotal"] = df_final["Quantidade"] * df_final["Preço Unitário"]
+    df_calc = st.session_state.itens_orcamento.copy()
+    df_calc["Subtotal"] = df_calc["Quantidade"] * df_calc["Preço Unitário"]
     
-    df_editado = st.data_editor(df_final, use_container_width=True, hide_index=True)
+    df_editado = st.data_editor(df_calc, use_container_width=True, hide_index=True)
     st.session_state.itens_orcamento = df_editado[["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"]]
     
     sub_total = df_editado["Subtotal"].sum()
@@ -153,7 +154,6 @@ if not st.session_state.itens_orcamento.empty:
         for _, r in df.iterrows():
             data.append([Paragraph(r['Artigo'], sty['Normal']), f"{r['Quantidade']:.2f}", r['UNID'], f"{r['Preço Unitário']:.2f}€", f"{(r['Quantidade']*r['Preço Unitário']):.2f}€"])
         
-        # Linhas de Totais
         num_itens = len(df)
         data.append(["", "", "", "SUBTOTAL:", f"{sub:,.2f}€"])
         data.append(["", "", "", f"IVA ({tx}%):", f"{iva:,.2f}€"])
