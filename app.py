@@ -64,16 +64,8 @@ with col_rasc:
     st.subheader("💾 Backup / Sistema")
     n_orc = st.text_input("Nº Orçamento", value=f"ORC-{date.today().year}-001")
     
-    # Lógica de Download (Exportar)
     dados_para_backup = {
-        "cliente": {
-            "nome": nome_cli, 
-            "morada": morada_cli, 
-            "tel": tel_cli, 
-            "email": email_cli, 
-            "obs": obs_cli, 
-            "n_orc": n_orc
-        },
+        "cliente": {"nome": nome_cli, "morada": morada_cli, "tel": tel_cli, "email": email_cli, "obs": obs_cli, "n_orc": n_orc},
         "itens": st.session_state.itens_orcamento.to_dict(orient="records")
     }
     
@@ -81,30 +73,23 @@ with col_rasc:
         label="📥 Guardar Backup (JSON)",
         data=json.dumps(dados_para_backup, indent=4),
         file_name=f"backup_{n_orc}.json",
-        mime="application/json",
         use_container_width=True
     )
     
     st.markdown("---")
-    
-    # Lógica de Upload (Restore) - BEM VISÍVEL AGORA
-    arquivo_upload = st.file_uploader("📂 Restaurar Backup", type="json", help="Carregue um ficheiro .json guardado anteriormente.")
-    
+    arquivo_upload = st.file_uploader("📂 Restaurar Backup", type="json")
     if arquivo_upload is not None:
         try:
             conteudo = json.load(arquivo_upload)
-            # Restaurar itens na tabela
             st.session_state.itens_orcamento = pd.DataFrame(conteudo["itens"])
-            st.success("Backup carregado com sucesso!")
-            # Nota: Para restaurar os campos de texto (Nome, Morada, etc), seria necessário
-            # usar chaves de estado para cada um, mas os itens já aparecerão na lista.
+            st.success("Backup carregado!")
             st.rerun()
         except Exception as e:
-            st.error(f"Erro ao carregar backup: {e}")
+            st.error(f"Erro no backup: {e}")
 
 st.divider()
 
-# --- 3. ADIÇÃO DE ITENS (LÓGICA DE PREÇO POR DEFEITO + EDITÁVEL) ---
+# --- 3. ADIÇÃO DE ITENS ---
 st.subheader("🔍 1. Adicionar Itens da Tabela")
 base_dados = carregar_base()
 lista_artigos = base_dados.apply(lambda x: f"{x['CÓDIGO']} - {x['DESCRIÇÃO']}", axis=1).tolist()
@@ -137,11 +122,8 @@ with c_add:
             cod_sel = artigo_escolhido.split(" - ")[0]
             desc_sel = artigo_escolhido.split(" - ", 1)[1]
             novo = pd.DataFrame([{
-                "CÓDIGO": cod_sel, 
-                "Artigo": desc_sel, 
-                "UNID": unid_def, 
-                "Preço Unitário": float(preco_final),
-                "Quantidade": float(qtd_val)
+                "CÓDIGO": cod_sel, "Artigo": desc_sel, "UNID": unid_def, 
+                "Preço Unitário": float(preco_final), "Quantidade": float(qtd_val)
             }])
             st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
             st.rerun()
@@ -152,7 +134,7 @@ st.divider()
 st.subheader("✍️ 2. Item Extra (Manual)")
 c_art_ex, c_uni_ex, c_pre_ex, c_qtd_ex, c_add_ex = st.columns([3, 0.6, 0.8, 0.8, 1])
 with c_art_ex:
-    artigo_ex = st.text_input("Descrição do Artigo Extra:", placeholder="Ex: Serviço de transporte...")
+    artigo_ex = st.text_input("Descrição do Artigo Extra:", placeholder="Ex: Mão-de-obra...")
 with c_uni_ex:
     uni_ex = st.text_input("Unid:", key="u_ex_man")
 with c_pre_ex:
@@ -167,7 +149,7 @@ with c_add_ex:
             st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo_ex], ignore_index=True)
             st.rerun()
 
-# 4. RESUMO E TABELA (MANTENDO AS 2 CASAS DECIMAIS)
+# --- 4. RESUMO E EXPORTAÇÃO ---
 st.divider()
 if not st.session_state.itens_orcamento.empty:
     st.markdown("### 📋 Resumo do Orçamento")
@@ -177,10 +159,7 @@ if not st.session_state.itens_orcamento.empty:
     df_f["Subtotal"] = df_f["Quantidade"] * df_f["Preço Unitário"]
     
     df_editado = st.data_editor(
-        df_f, 
-        use_container_width=True, 
-        hide_index=True, 
-        num_rows="dynamic",
+        df_f, use_container_width=True, hide_index=True, num_rows="dynamic",
         column_config={
             "Preço Unitário": st.column_config.NumberColumn(format="%.2f €"),
             "Quantidade": st.column_config.NumberColumn(format="%.2f"),
@@ -193,44 +172,48 @@ if not st.session_state.itens_orcamento.empty:
     iva_val = sub_val * (taxa_iva / 100)
     total_val = sub_val + iva_val
 
-    def criar_pdf(df, sub, iva_v, total_f, taxa):
+    # Funções de ficheiro
+    def criar_pdf():
         buf = io.BytesIO()
         doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20, bottomMargin=20)
         sty = getSampleStyleSheet()
-        est_tab = sty['Normal']
-        est_tab.fontSize = 8
         elems = []
         if os.path.exists("logo.png"):
             img = RLImage("logo.png", width=1.25*inch, height=0.6*inch)
             img.hAlign = 'CENTER'
             elems.append(img)
-        elems.append(Paragraph("JMOS V 1.1", sty['Normal']))
         elems.append(Paragraph(f"ORÇAMENTO: {n_orc}", sty['Title']))
-        elems.append(Spacer(1, 15))
-        cli_info = f"<b>Cliente:</b> {nome_cli}<br/><b>Morada:</b> {morada_cli}"
-        elems.append(Paragraph(cli_info, sty['Normal']))
-        elems.append(Spacer(1, 15))
-        data = [["Artigo / Descrição", "Qtd", "Unid", "Preço Unit.", "Total"]]
-        for _, r in df.iterrows():
-            data.append([Paragraph(str(r['Artigo']), est_tab), f"{r['Quantidade']:.2f}", r['UNID'], f"{r['Preço Unitário']:.2f}€", f"{r['Subtotal']:.2f}€"])
-        data.append(["", "", "", "SUBTOTAL:", f"{sub:,.2f}€"])
-        data.append(["", "", "", f"IVA ({taxa}%):", f"{iva_v:,.2f}€"])
-        data.append(["", "", "", "TOTAL FINAL:", f"{total_f:,.2f}€"])
+        elems.append(Paragraph(f"<b>Cliente:</b> {nome_cli}", sty['Normal']))
+        data = [["Artigo", "Qtd", "Unid", "Preço", "Total"]]
+        for _, r in df_editado.iterrows():
+            data.append([Paragraph(str(r['Artigo']), sty['Normal']), f"{r['Quantidade']:.2f}", r['UNID'], f"{r['Preço Unitário']:.2f}€", f"{r['Subtotal']:.2f}€"])
+        data.append(["", "", "", "TOTAL:", f"{total_val:,.2f}€"])
         t = Table(data, colWidths=[280, 45, 45, 75, 75])
-        t.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), AZUL_LOGO),
-            ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-            ('ALIGN', (1,0), (-1,-1), 'CENTER'),
-            ('GRID', (0,0), (-1, len(df)), 0.5, colors.grey),
-            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-        ]))
+        t.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), AZUL_LOGO), ('TEXTCOLOR', (0,0), (-1,0), colors.white), ('GRID', (0,0), (-1, len(df_editado)), 0.5, colors.grey)]))
         elems.append(t)
         doc.build(elems)
         return buf.getvalue()
 
+    def criar_excel():
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            df_editado.to_excel(writer, index=False, sheet_name='Orçamento')
+            # O xlsxwriter permite personalizar mais se precisares no futuro
+        return output.getvalue()
+
+    # BOTÕES DE AÇÃO LADO A LADO
+    st.markdown("---")
     c1, c2, c3 = st.columns(3)
-    c1.download_button("📥 Baixar PDF JMOS", data=criar_pdf(df_editado, sub_val, iva_val, total_val, taxa_iva), file_name=f"Orcamento_{n_orc}.pdf", use_container_width=True)
     
-    if c3.button("🗑️ Limpar Tudo", use_container_width=True):
-        st.session_state.itens_orcamento = pd.DataFrame(columns=["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"])
-        st.rerun()
+    with c1:
+        st.download_button("📥 Baixar PDF JMOS", data=criar_pdf(), file_name=f"{n_orc}.pdf", use_container_width=True)
+    
+    with c2:
+        st.download_button("📊 Baixar Excel", data=criar_excel(), file_name=f"{n_orc}.xlsx", 
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+                           use_container_width=True)
+    
+    with c3:
+        if st.button("🗑️ Limpar Tudo", use_container_width=True):
+            st.session_state.itens_orcamento = pd.DataFrame(columns=["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"])
+            st.rerun()
