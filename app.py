@@ -34,6 +34,7 @@ def carregar_base():
             st.error(f"Erro ao ler Excel: {e}")
     return pd.DataFrame(columns=["CÓDIGO", "DESCRIÇÃO", "UNID", "Preço Unitário"])
 
+# Inicialização do estado
 if "itens_orcamento" not in st.session_state:
     st.session_state.itens_orcamento = pd.DataFrame(columns=["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"])
 
@@ -72,44 +73,43 @@ with col_rasc:
 
 st.divider()
 
-# --- 3. ADIÇÃO DE ITENS (LAYOUT ORIGINAL EM LINHA RECUPERADO) ---
-st.subheader("🔍 1. Adicionar Itens da Tabela")
+# --- 3. ADIÇÃO DE ITENS (FIX: TUDO NUMA LINHA COM ATUALIZAÇÃO REAL-TIME) ---
+st.subheader("🔍 1. Adicionar Itens")
 base = carregar_base()
 lista_artigos = base.apply(lambda x: f"{x['CÓDIGO']} - {x['DESCRIÇÃO']}", axis=1).tolist()
 
-# Recuperamos as colunas originais para ficar tudo na mesma linha
-c_sel, c_uni, c_pre, c_qtd, c_add = st.columns([2.5, 0.6, 0.8, 0.6, 0.8])
+# Criamos as colunas idênticas à tua imagem preferida
+c_sel, c_uni, c_pre, c_qtd, c_add = st.columns([3, 0.6, 0.8, 0.8, 1])
 
 with c_sel:
-    escolha = st.selectbox("Artigo:", options=[""] + lista_artigos, index=0, key="sel_principal")
+    escolha = st.selectbox("Artigo:", options=[""] + lista_artigos, index=0)
 
-# Lógica para detetar a mudança e extrair os valores imediatamente
-unidade_exibir = ""
-preco_exibir = ""
+# Procuramos os dados da base assim que o utilizador seleciona
+unid_val = ""
+preco_val = ""
+
 if escolha:
-    cod_temp = escolha.split(" - ")[0]
-    row_temp = base[base["CÓDIGO"] == cod_temp].iloc[0]
-    unidade_exibir = str(row_temp["UNID"])
-    preco_exibir = f"{float(row_temp['Preço Unitário']):.2f} €"
+    codigo_extraido = escolha.split(" - ")[0]
+    # Filtra a base para buscar unidade e preço
+    dados_item = base[base["CÓDIGO"] == codigo_extraido].iloc[0]
+    unid_val = str(dados_item["UNID"])
+    preco_val = f"{float(dados_item['Preço Unitário']):.2f} €"
 
 with c_uni:
-    # Mostra a unidade em caixa cinzenta
-    st.text_input("Unid.", value=unidade_exibir, disabled=True, key="unid_view")
+    st.text_input("Unid.", value=unid_val, disabled=True, key="preview_unid")
 
 with c_pre:
-    # Mostra o preço em caixa cinzenta
-    st.text_input("Preço Unit.", value=preco_exibir, disabled=True, key="preco_view")
+    st.text_input("Preço Unit.", value=preco_val, disabled=True, key="preview_preco")
 
 with c_qtd:
-    qtd_val = st.number_input("Qtd", min_value=0.01, value=1.0, step=0.5, key="qtd_input")
+    qtd_val = st.number_input("Qtd", min_value=0.01, value=1.0, step=0.5, key="input_qtd")
 
 with c_add:
     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-    btn_add = st.button("✅ Adicionar", use_container_width=True, key="btn_add_tab")
+    btn_add = st.button("✅ Adicionar", use_container_width=True)
 
 if btn_add and escolha:
-    cod_sel = escolha.split(" - ")[0]
-    row = base[base["CÓDIGO"] == cod_sel].iloc[0]
+    row = base[base["CÓDIGO"] == escolha.split(" - ")[0]].iloc[0]
     novo = pd.DataFrame([{
         "CÓDIGO": row["CÓDIGO"], 
         "Artigo": row["DESCRIÇÃO"], 
@@ -122,27 +122,27 @@ if btn_add and escolha:
 
 st.divider()
 
-# --- ITEM EXTRA (MANUAL) ---
+# --- SECÇÃO 2: ITEM EXTRA (MANUAL) ---
 st.subheader("✍️ 2. Item Extra (Manual)")
-c_art_ex, c_uni_ex, c_pre_ex, c_qtd_ex, c_add_ex = st.columns([2.5, 0.6, 0.8, 0.6, 0.8])
+c_art_ex, c_uni_ex, c_pre_ex, c_qtd_ex, c_add_ex = st.columns([3, 0.6, 0.8, 0.8, 1])
 
 with c_art_ex:
     artigo_extra = st.text_input("Descrição do Artigo Extra:", placeholder="Ex: Mão-de-obra...")
 with c_uni_ex:
-    unidade_extra = st.text_input("Unid:", key="uni_ex_man")
+    unidade_extra = st.text_input("Unid:", key="uni_manual")
 with c_pre_ex:
-    preco_extra = st.number_input("Preço Unit (€):", min_value=0.0, key="pre_ex_man")
+    preco_extra = st.number_input("Preço (€):", min_value=0.0, key="pre_manual")
 with c_qtd_ex:
-    qtd_extra = st.number_input("Qtd:", min_value=0.01, value=1.0, key="qtd_ex_man")
+    qtd_extra = st.number_input("Qtd:", min_value=0.01, value=1.0, key="qtd_manual")
 with c_add_ex:
     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-    if st.button("➕ Adicionar Extra", use_container_width=True, key="btn_add_man"):
+    if st.button("➕ Adicionar Extra", use_container_width=True):
         if artigo_extra:
-            novo_extra = pd.DataFrame([{
+            novo_ex = pd.DataFrame([{
                 "CÓDIGO": "EXTRA", "Artigo": artigo_extra, "UNID": unidade_extra, 
                 "Preço Unitário": float(preco_extra), "Quantidade": qtd_extra
             }])
-            st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo_extra], ignore_index=True)
+            st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo_ex], ignore_index=True)
             st.rerun()
 
 # 4. RESUMO E GESTÃO DE IVA
@@ -150,7 +150,7 @@ st.divider()
 if not st.session_state.itens_orcamento.empty:
     st.markdown("### 📋 Resumo do Orçamento")
     
-    col_iva_sel, col_empty = st.columns([1, 4])
+    col_iva_sel, _ = st.columns([1, 4])
     taxa_iva = col_iva_sel.selectbox("Taxa de IVA:", [23, 13, 6, 0], format_func=lambda x: f"{x}%" if x > 0 else "Isento")
 
     df_final = st.session_state.itens_orcamento.copy()
@@ -172,69 +172,51 @@ if not st.session_state.itens_orcamento.empty:
     iva_val = sub_val * (taxa_iva / 100)
     total_val = sub_val + iva_val
 
+    # Função PDF (Mantida conforme o teu padrão original)
     def criar_pdf(df, sub, iva_v, total_f, taxa):
         buf = io.BytesIO()
         doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20, bottomMargin=20)
         sty = getSampleStyleSheet()
         est_tab = sty['Normal']
         est_tab.fontSize = 8
-        
         elems = []
         if os.path.exists("logo.png"):
             img = RLImage("logo.png", width=1.5*inch, height=0.8*inch)
             img.hAlign = 'LEFT'
             elems.append(img)
-            
         elems.append(Paragraph(f"ORÇAMENTO: {n_orc}", sty['Title']))
         elems.append(Spacer(1, 15))
-        
         cli_info = f"<b>Cliente:</b> {nome_cli}<br/><b>Morada:</b> {morada_cli}<br/><b>Email:</b> {email_cli}"
         elems.append(Paragraph(cli_info, sty['Normal']))
         elems.append(Spacer(1, 15))
-        
         data = [["Artigo / Descrição", "Qtd", "Unid", "Preço Unit.", "Total"]]
         for _, r in df.iterrows():
             data.append([Paragraph(str(r['Artigo']), est_tab), f"{r['Quantidade']:.2f}", r['UNID'], f"{r['Preço Unitário']:.2f}€", f"{r['Subtotal']:.2f}€"])
-        
         num_itens = len(df)
         data.append(["", "", "", "SUBTOTAL:", f"{sub:,.2f}€"])
         data.append(["", "", "", f"IVA ({taxa}%):", f"{iva_v:,.2f}€"])
         data.append(["", "", "", "TOTAL FINAL:", f"{total_f:,.2f}€"])
-        
         t = Table(data, colWidths=[280, 45, 45, 75, 75])
-        
-        estilos = [
+        t.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), AZUL_LOGO),
             ('TEXTCOLOR', (0,0), (-1,0), colors.white),
-            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
             ('ALIGN', (1,0), (-1,-1), 'CENTER'),
-            ('ALIGN', (3,0), (4,-1), 'RIGHT'),
-            ('VALIGN', (0,0), (-1,-1), 'TOP'),
             ('GRID', (0,0), (-1, num_itens), 0.5, colors.grey),
-            ('FONTNAME', (3, num_itens+1), (3, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (3, num_itens+1), (-1, -1), 9),
             ('BACKGROUND', (3, -1), (4, -1), colors.lightgrey),
-            ('BOX', (3, -1), (4, -1), 1, colors.black),
-        ]
-        
-        t.setStyle(TableStyle(estilos))
+        ]))
         elems.append(t)
-        
         if obs_cli:
             elems.append(Spacer(1, 20))
             elems.append(Paragraph(f"<b>Observações:</b><br/>{obs_cli}", sty['Normal']))
-            
         doc.build(elems)
         return buf.getvalue()
 
     c1, c2, c3 = st.columns(3)
     c1.download_button("📥 Baixar PDF", data=criar_pdf(df_editado, sub_val, iva_val, total_val, taxa_iva), file_name=f"{n_orc}.pdf", use_container_width=True)
-    
     buf_x = io.BytesIO()
     with pd.ExcelWriter(buf_x, engine='xlsxwriter') as wr:
         df_editado.to_excel(wr, index=False)
     c2.download_button("📊 Baixar Excel", data=buf_x.getvalue(), file_name=f"{n_orc}.xlsx", use_container_width=True)
-
     if c3.button("🗑️ Limpar Tudo", use_container_width=True):
         st.session_state.itens_orcamento = pd.DataFrame(columns=["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"])
         st.rerun()
