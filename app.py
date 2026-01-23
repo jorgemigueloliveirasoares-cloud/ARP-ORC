@@ -83,22 +83,30 @@ with col_pesquisa:
     escolha = st.selectbox("Pesquise o código ou nome do artigo:", options=[""] + lista_artigos, index=0)
 
 with col_qtd:
-    qtd_txt = st.text_input("Qtd", value="1", key="qtd_sel")
+    # Mudamos para number_input para evitar erros de texto e o aviso de "Qtd inválida"
+    qtd_val = st.number_input("Qtd", min_value=0.01, value=1.0, step=1.0, key="qtd_num")
 
 with col_botao:
     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
     btn_add = st.button("✅ Adicionar", use_container_width=True)
 
-if btn_add and escolha:
-    cod_sel = escolha.split(" - ")[0]
-    row = base[base["CÓDIGO"] == cod_sel].iloc[0]
-    try:
-        v = float(qtd_txt.replace(',', '.'))
-        if v > 0:
-            novo = pd.DataFrame([{"CÓDIGO": row["CÓDIGO"], "Artigo": row["DESCRIÇÃO"], "UNID": row["UNID"], "Preço Unitário": float(row["Preço Unitário"]), "Quantidade": v}])
-            st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
-            st.rerun()
-    except: st.error("Qtd inválida")
+if btn_add:
+    if escolha != "":
+        cod_sel = escolha.split(" - ")[0]
+        row = base[base["CÓDIGO"] == cod_sel].iloc[0]
+        
+        novo = pd.DataFrame([{
+            "CÓDIGO": row["CÓDIGO"], 
+            "Artigo": row["DESCRIÇÃO"], 
+            "UNID": row["UNID"], 
+            "Preço Unitário": float(row["Preço Unitário"]), 
+            "Quantidade": qtd_val
+        }])
+        st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
+        st.toast(f"Adicionado: {row['CÓDIGO']}", icon="✅") # Pequena notificação no canto
+        st.rerun()
+    else:
+        st.warning("Por favor, selecione um artigo na lista.")
 
 # 4. RESUMO E GESTÃO DE IVA
 st.divider()
@@ -116,6 +124,7 @@ if not st.session_state.itens_orcamento.empty:
         column_config={
             "Preço Unitário": st.column_config.NumberColumn("Preço Unitário", format="%.2f €"),
             "Subtotal": st.column_config.NumberColumn("Subtotal", format="%.2f €"),
+            "Quantidade": st.column_config.NumberColumn("Quantidade", format="%.2f"),
         },
         use_container_width=True, hide_index=True
     )
@@ -151,33 +160,25 @@ if not st.session_state.itens_orcamento.empty:
         elems.append(Paragraph(cli_info, sty['Normal']))
         elems.append(Spacer(1, 15))
         
-        # Estrutura de dados da Tabela
         data = [["Artigo / Descrição", "Qtd", "Unid", "Preço Unit.", "Total"]]
         for _, r in df.iterrows():
             data.append([Paragraph(str(r['Artigo']), est_tab), f"{r['Quantidade']:.2f}", r['UNID'], f"{r['Preço Unitário']:.2f}€", f"{r['Subtotal']:.2f}€"])
         
-        # Linhas de Totais (Corrigidas para alinhamento e design)
         data.append(["", "", "", "SUBTOTAL:", f"{sub:,.2f}€"])
         data.append(["", "", "", f"IVA ({taxa}%):", f"{iva_v:,.2f}€"])
         data.append(["", "", "", "TOTAL FINAL:", f"{total_f:,.2f}€"])
         
         t = Table(data, colWidths=[280, 45, 45, 65, 65])
-        
-        # Estilo da Tabela
         t.setStyle(TableStyle([
-            ('GRID', (0,0), (-1,-4), 0.5, colors.grey), # Grelha apenas nos itens
-            ('BACKGROUND', (0,0), (-1,0), AZUL_LOGO), # Cabeçalho azul institucional
+            ('GRID', (0,0), (-1,-4), 0.5, colors.grey),
+            ('BACKGROUND', (0,0), (-1,0), AZUL_LOGO),
             ('TEXTCOLOR', (0,0), (-1,0), colors.white),
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
             ('ALIGN', (1,0), (-1,-1), 'CENTER'),
             ('ALIGN', (3,0), (4,-1), 'RIGHT'),
             ('VALIGN', (0,0), (-1,-1), 'TOP'),
-            # Estilo para as linhas de Totais
             ('FONTNAME', (3,-3), (3,-1), 'Helvetica-Bold'),
-            ('FONTNAME', (4,-3), (4,-1), 'Helvetica'),
-            ('FONTNAME', (4,-1), (4,-1), 'Helvetica-Bold'), # Total Final Negrito
-            ('BACKGROUND', (3,-1), (4,-1), colors.lightgrey), # Fundo cinza apenas no Total Final
-            ('LINEBELOW', (3,-3), (4,-1), 0.5, colors.black),
+            ('BACKGROUND', (3,-1), (4,-1), colors.lightgrey),
         ]))
         elems.append(t)
         
