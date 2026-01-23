@@ -37,22 +37,6 @@ def carregar_base():
 # Inicialização do Estado
 if "itens_orcamento" not in st.session_state:
     st.session_state.itens_orcamento = pd.DataFrame(columns=["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"])
-if "unid_preview" not in st.session_state:
-    st.session_state.unid_preview = ""
-if "preco_editavel" not in st.session_state:
-    st.session_state.preco_editavel = 0.0
-
-def atualizar_campos():
-    escolha = st.session_state.sel_artigo
-    if escolha:
-        base = carregar_base()
-        cod = escolha.split(" - ")[0]
-        item = base[base["CÓDIGO"] == cod].iloc[0]
-        st.session_state.unid_preview = str(item["UNID"])
-        st.session_state.preco_editavel = float(item["Preço Unitário"])
-    else:
-        st.session_state.unid_preview = ""
-        st.session_state.preco_editavel = 0.0
 
 # --- CABEÇALHO JMOS V 1.1 ---
 st.markdown("<h1 style='text-align: center; color: #0073B4;'>JMOS V 1.1</h1>", unsafe_allow_html=True)
@@ -83,38 +67,45 @@ with col_rasc:
 
 st.divider()
 
-# --- 3. ADIÇÃO DE ITENS ---
+# --- 3. ADIÇÃO DE ITENS (LÓGICA DE PREÇO POR DEFEITO + EDITÁVEL) ---
 st.subheader("🔍 1. Adicionar Itens da Tabela")
 base_dados = carregar_base()
 lista_artigos = base_dados.apply(lambda x: f"{x['CÓDIGO']} - {x['DESCRIÇÃO']}", axis=1).tolist()
 
 c_sel, c_uni, c_pre, c_qtd, c_add = st.columns([3, 0.6, 0.8, 0.8, 1])
 
-with c_sel:
-    st.selectbox("Artigo:", options=[""] + lista_artigos, key="sel_artigo", on_change=atualizar_campos)
+# Lógica para capturar dados do artigo ANTES de desenhar os inputs
+unid_def = ""
+preco_def = 0.0
+artigo_escolhido = c_sel.selectbox("Artigo:", options=[""] + lista_artigos, key="sel_artigo_main")
+
+if artigo_escolhido:
+    cod_temp = artigo_escolhido.split(" - ")[0]
+    row_temp = base_dados[base_dados["CÓDIGO"] == cod_temp].iloc[0]
+    unid_def = str(row_temp["UNID"])
+    preco_def = float(row_temp["Preço Unitário"])
 
 with c_uni:
-    st.text_input("Unid.", value=st.session_state.unid_preview, disabled=True)
+    st.text_input("Unid.", value=unid_def, disabled=True, key=f"unid_{artigo_escolhido}")
 
 with c_pre:
-    # Formatado com 2 casas decimais
-    novo_preco = st.number_input("Preço Unit (€)", value=st.session_state.preco_editavel, format="%.2f", step=0.01, key="input_preco_edit")
+    # A 'key' dinâmica força o campo a resetar para o valor da tabela sempre que mudas o artigo
+    preco_final = st.number_input("Preço Unit (€)", value=preco_def, format="%.2f", step=0.01, key=f"preco_{artigo_escolhido}")
 
 with c_qtd:
-    # Quantidade também com 2 casas decimais
-    qtd_val = st.number_input("Qtd", min_value=0.01, value=1.00, step=0.10, format="%.2f", key="q_tab")
+    qtd_val = st.number_input("Qtd", min_value=0.01, value=1.00, step=0.10, format="%.2f", key="q_tab_global")
 
 with c_add:
     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
     if st.button("✅ Adicionar", use_container_width=True):
-        if st.session_state.sel_artigo:
-            cod_sel = st.session_state.sel_artigo.split(" - ")[0]
-            desc_sel = st.session_state.sel_artigo.split(" - ", 1)[1]
+        if artigo_escolhido:
+            cod_sel = artigo_escolhido.split(" - ")[0]
+            desc_sel = artigo_escolhido.split(" - ", 1)[1]
             novo = pd.DataFrame([{
                 "CÓDIGO": cod_sel, 
                 "Artigo": desc_sel, 
-                "UNID": st.session_state.unid_preview, 
-                "Preço Unitário": float(novo_preco),
+                "UNID": unid_def, 
+                "Preço Unitário": float(preco_final), # Aqui grava o valor que estiver na caixa (original ou editado)
                 "Quantidade": float(qtd_val)
             }])
             st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
@@ -122,7 +113,7 @@ with c_add:
 
 st.divider()
 
-# --- SECÇÃO 2: ITEM EXTRA ---
+# --- SECÇÃO 2: ITEM EXTRA (IGUALMENTE COM 2 CASAS DECIMAIS) ---
 st.subheader("✍️ 2. Item Extra (Manual)")
 c_art_ex, c_uni_ex, c_pre_ex, c_qtd_ex, c_add_ex = st.columns([3, 0.6, 0.8, 0.8, 1])
 with c_art_ex:
@@ -141,7 +132,7 @@ with c_add_ex:
             st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo_ex], ignore_index=True)
             st.rerun()
 
-# 4. RESUMO E TABELA
+# 4. RESUMO E TABELA (MANTENDO AS 2 CASAS DECIMAIS)
 st.divider()
 if not st.session_state.itens_orcamento.empty:
     st.markdown("### 📋 Resumo do Orçamento")
@@ -150,7 +141,6 @@ if not st.session_state.itens_orcamento.empty:
     df_f = st.session_state.itens_orcamento.copy()
     df_f["Subtotal"] = df_f["Quantidade"] * df_f["Preço Unitário"]
     
-    # Configuração de colunas para forçar 2 casas decimais no editor
     df_editado = st.data_editor(
         df_f, 
         use_container_width=True, 
@@ -168,69 +158,45 @@ if not st.session_state.itens_orcamento.empty:
     iva_val = sub_val * (taxa_iva / 100)
     total_val = sub_val + iva_val
 
+    # Função PDF simplificada para manter consistência
     def criar_pdf(df, sub, iva_v, total_f, taxa):
         buf = io.BytesIO()
         doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20, bottomMargin=20)
         sty = getSampleStyleSheet()
         est_tab = sty['Normal']
         est_tab.fontSize = 8
-        
         elems = []
         if os.path.exists("logo.png"):
             img = RLImage("logo.png", width=1.25*inch, height=0.6*inch)
             img.hAlign = 'CENTER'
             elems.append(img)
-            
         elems.append(Paragraph("JMOS V 1.1", sty['Normal']))
         elems.append(Paragraph(f"ORÇAMENTO: {n_orc}", sty['Title']))
         elems.append(Spacer(1, 15))
-        
-        cli_info = f"<b>Cliente:</b> {nome_cli}<br/><b>Morada:</b> {morada_cli}<br/><b>Email:</b> {email_cli}"
+        cli_info = f"<b>Cliente:</b> {nome_cli}<br/><b>Morada:</b> {morada_cli}"
         elems.append(Paragraph(cli_info, sty['Normal']))
         elems.append(Spacer(1, 15))
-        
         data = [["Artigo / Descrição", "Qtd", "Unid", "Preço Unit.", "Total"]]
         for _, r in df.iterrows():
-            # Forçar 2 casas decimais em todas as células do PDF
-            data.append([
-                Paragraph(str(r['Artigo']), est_tab), 
-                f"{r['Quantidade']:.2f}", 
-                r['UNID'], 
-                f"{r['Preço Unitário']:.2f}€", 
-                f"{r['Subtotal']:.2f}€"
-            ])
-        
-        num_itens = len(df)
+            data.append([Paragraph(str(r['Artigo']), est_tab), f"{r['Quantidade']:.2f}", r['UNID'], f"{r['Preço Unitário']:.2f}€", f"{r['Subtotal']:.2f}€"])
         data.append(["", "", "", "SUBTOTAL:", f"{sub:,.2f}€"])
         data.append(["", "", "", f"IVA ({taxa}%):", f"{iva_v:,.2f}€"])
         data.append(["", "", "", "TOTAL FINAL:", f"{total_f:,.2f}€"])
-        
         t = Table(data, colWidths=[280, 45, 45, 75, 75])
         t.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), AZUL_LOGO),
             ('TEXTCOLOR', (0,0), (-1,0), colors.white),
             ('ALIGN', (1,0), (-1,-1), 'CENTER'),
-            ('GRID', (0,0), (-1, num_itens), 0.5, colors.grey),
-            ('BACKGROUND', (3, -1), (4, -1), colors.lightgrey),
+            ('GRID', (0,0), (-1, len(df)), 0.5, colors.grey),
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
         ]))
         elems.append(t)
-        
-        if obs_cli:
-            elems.append(Spacer(1, 20))
-            elems.append(Paragraph(f"<b>Observações:</b><br/>{obs_cli}", sty['Normal']))
-            
         doc.build(elems)
         return buf.getvalue()
 
     c1, c2, c3 = st.columns(3)
     c1.download_button("📥 Baixar PDF JMOS", data=criar_pdf(df_editado, sub_val, iva_val, total_val, taxa_iva), file_name=f"Orcamento_{n_orc}.pdf", use_container_width=True)
     
-    buf_x = io.BytesIO()
-    with pd.ExcelWriter(buf_x, engine='xlsxwriter') as wr:
-        df_editado.to_excel(wr, index=False)
-    c2.download_button("📊 Baixar Excel", data=buf_x.getvalue(), file_name=f"Orcamento_{n_orc}.xlsx", use_container_width=True)
-
     if c3.button("🗑️ Limpar Tudo", use_container_width=True):
         st.session_state.itens_orcamento = pd.DataFrame(columns=["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"])
         st.rerun()
