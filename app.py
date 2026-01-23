@@ -77,36 +77,24 @@ st.subheader("🔍 1. Adicionar Itens")
 base = carregar_base()
 lista_artigos = base.apply(lambda x: f"{x['CÓDIGO']} - {x['DESCRIÇÃO']}", axis=1).tolist()
 
-col_pesquisa, col_qtd, col_botao = st.columns([3, 0.8, 1])
+col_pesq, col_qtd, col_btn = st.columns([3, 0.8, 1])
 
-with col_pesquisa:
+with col_pesq:
     escolha = st.selectbox("Pesquise o código ou nome do artigo:", options=[""] + lista_artigos, index=0)
 
 with col_qtd:
-    # Mudamos para number_input para evitar erros de texto e o aviso de "Qtd inválida"
-    qtd_val = st.number_input("Qtd", min_value=0.01, value=1.0, step=1.0, key="qtd_num")
+    qtd_val = st.number_input("Qtd", min_value=0.01, value=1.0, step=0.5)
 
-with col_botao:
+with col_btn:
     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
     btn_add = st.button("✅ Adicionar", use_container_width=True)
 
-if btn_add:
-    if escolha != "":
-        cod_sel = escolha.split(" - ")[0]
-        row = base[base["CÓDIGO"] == cod_sel].iloc[0]
-        
-        novo = pd.DataFrame([{
-            "CÓDIGO": row["CÓDIGO"], 
-            "Artigo": row["DESCRIÇÃO"], 
-            "UNID": row["UNID"], 
-            "Preço Unitário": float(row["Preço Unitário"]), 
-            "Quantidade": qtd_val
-        }])
-        st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
-        st.toast(f"Adicionado: {row['CÓDIGO']}", icon="✅") # Pequena notificação no canto
-        st.rerun()
-    else:
-        st.warning("Por favor, selecione um artigo na lista.")
+if btn_add and escolha:
+    cod_sel = escolha.split(" - ")[0]
+    row = base[base["CÓDIGO"] == cod_sel].iloc[0]
+    novo = pd.DataFrame([{"CÓDIGO": row["CÓDIGO"], "Artigo": row["DESCRIÇÃO"], "UNID": row["UNID"], "Preço Unitário": float(row["Preço Unitário"]), "Quantidade": qtd_val}])
+    st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
+    st.rerun()
 
 # 4. RESUMO E GESTÃO DE IVA
 st.divider()
@@ -135,11 +123,6 @@ if not st.session_state.itens_orcamento.empty:
     iva_val = sub_val * (taxa_iva / 100)
     total_val = sub_val + iva_val
 
-    c_t1, c_t2, c_t3 = st.columns(3)
-    c_t1.metric("Subtotal", f"{sub_val:,.2f}€")
-    c_t2.metric(f"IVA ({taxa_iva}%)", f"{iva_val:,.2f}€")
-    c_t3.metric("TOTAL FINAL", f"{total_val:,.2f}€")
-
     def criar_pdf(df, sub, iva_v, total_f, taxa):
         buf = io.BytesIO()
         doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20, bottomMargin=20)
@@ -160,26 +143,38 @@ if not st.session_state.itens_orcamento.empty:
         elems.append(Paragraph(cli_info, sty['Normal']))
         elems.append(Spacer(1, 15))
         
+        # TABELA PRINCIPAL
         data = [["Artigo / Descrição", "Qtd", "Unid", "Preço Unit.", "Total"]]
         for _, r in df.iterrows():
             data.append([Paragraph(str(r['Artigo']), est_tab), f"{r['Quantidade']:.2f}", r['UNID'], f"{r['Preço Unitário']:.2f}€", f"{r['Subtotal']:.2f}€"])
         
+        num_itens = len(df)
+        
+        # LINHAS DE TOTAIS
         data.append(["", "", "", "SUBTOTAL:", f"{sub:,.2f}€"])
         data.append(["", "", "", f"IVA ({taxa}%):", f"{iva_v:,.2f}€"])
         data.append(["", "", "", "TOTAL FINAL:", f"{total_f:,.2f}€"])
         
-        t = Table(data, colWidths=[280, 45, 45, 65, 65])
-        t.setStyle(TableStyle([
-            ('GRID', (0,0), (-1,-4), 0.5, colors.grey),
+        t = Table(data, colWidths=[280, 45, 45, 75, 75])
+        
+        estilos = [
             ('BACKGROUND', (0,0), (-1,0), AZUL_LOGO),
             ('TEXTCOLOR', (0,0), (-1,0), colors.white),
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
             ('ALIGN', (1,0), (-1,-1), 'CENTER'),
             ('ALIGN', (3,0), (4,-1), 'RIGHT'),
             ('VALIGN', (0,0), (-1,-1), 'TOP'),
-            ('FONTNAME', (3,-3), (3,-1), 'Helvetica-Bold'),
-            ('BACKGROUND', (3,-1), (4,-1), colors.lightgrey),
-        ]))
+            ('GRID', (0,0), (-1, num_itens), 0.5, colors.grey), # Grelha apenas nos itens
+            # Formatação Totais
+            ('FONTNAME', (3, num_itens+1), (3, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (3, num_itens+1), (-1, -1), 9),
+            ('BOTTOMPADDING', (0, num_itens+1), (-1, -1), 5),
+            ('TOPPADDING', (0, num_itens+1), (-1, -1), 5),
+            ('BACKGROUND', (3, -1), (4, -1), colors.lightgrey), # Fundo cinza no Total Final
+            ('BOX', (3, -1), (4, -1), 1, colors.black), # Caixa preta no Total Final
+        ]
+        
+        t.setStyle(TableStyle(estilos))
         elems.append(t)
         
         if obs_cli:
@@ -189,8 +184,9 @@ if not st.session_state.itens_orcamento.empty:
         doc.build(elems)
         return buf.getvalue()
 
+    # Botões de Exportação
     c1, c2, c3 = st.columns(3)
-    c1.download_button("📥 Baixar PDF Profissional", data=criar_pdf(df_editado, sub_val, iva_val, total_val, taxa_iva), file_name=f"{n_orc}.pdf", use_container_width=True)
+    c1.download_button("📥 Baixar PDF Corrigido", data=criar_pdf(df_editado, sub_val, iva_val, total_val, taxa_iva), file_name=f"{n_orc}.pdf", use_container_width=True)
     
     buf_x = io.BytesIO()
     with pd.ExcelWriter(buf_x, engine='xlsxwriter') as wr:
