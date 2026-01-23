@@ -38,8 +38,8 @@ def carregar_base():
 if "itens_orcamento" not in st.session_state:
     st.session_state.itens_orcamento = pd.DataFrame(columns=["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"])
 
-# --- CABEÇALHO JMOS V 1.2 ---
-st.markdown("<h1 style='text-align: center; color: #0073B4;'>JMOS V 1.2</h1>", unsafe_allow_html=True)
+# --- CABEÇALHO JMOS V 1.1 ---
+st.markdown("<h1 style='text-align: center; color: #0073B4;'>JMOS V 1.1</h1>", unsafe_allow_html=True)
 
 if os.path.exists("logo.png"):
     col_l1, col_l2, col_l3 = st.columns([2, 1, 2])
@@ -48,22 +48,59 @@ if os.path.exists("logo.png"):
 
 st.divider()
 
-# 2. DADOS DO CLIENTE
+# 2. DADOS DO CLIENTE E BACKUP
 col_cli, col_rasc = st.columns([3, 1.2])
+
 with col_cli:
     st.subheader("📋 Dados do Cliente")
-    nome_cli = st.text_input("Nome do Cliente")
-    morada_cli = st.text_input("Morada")
+    nome_cli = st.text_input("Nome do Cliente", key="nome_cli_input")
+    morada_cli = st.text_input("Morada", key="morada_cli_input")
     c1, c2 = st.columns(2)
-    tel_cli = c1.text_input("Telefone")
-    email_cli = c2.text_input("Email")
-    obs_cli = st.text_area("Observações / Condições de Pagamento")
+    tel_cli = c1.text_input("Telefone", key="tel_cli_input")
+    email_cli = c2.text_input("Email", key="email_cli_input")
+    obs_cli = st.text_area("Observações / Condições de Pagamento", key="obs_cli_input")
 
 with col_rasc:
-    st.subheader("💾 Sistema")
+    st.subheader("💾 Backup / Sistema")
     n_orc = st.text_input("Nº Orçamento", value=f"ORC-{date.today().year}-001")
-    dados_backup = {"cliente": {"nome": nome_cli, "n_orc": n_orc}, "itens": st.session_state.itens_orcamento.to_dict(orient="records")}
-    st.download_button("📥 Guardar Rascunho", data=json.dumps(dados_backup), file_name=f"backup_{n_orc}.json", use_container_width=True)
+    
+    # Lógica de Download (Exportar)
+    dados_para_backup = {
+        "cliente": {
+            "nome": nome_cli, 
+            "morada": morada_cli, 
+            "tel": tel_cli, 
+            "email": email_cli, 
+            "obs": obs_cli, 
+            "n_orc": n_orc
+        },
+        "itens": st.session_state.itens_orcamento.to_dict(orient="records")
+    }
+    
+    st.download_button(
+        label="📥 Guardar Backup (JSON)",
+        data=json.dumps(dados_para_backup, indent=4),
+        file_name=f"backup_{n_orc}.json",
+        mime="application/json",
+        use_container_width=True
+    )
+    
+    st.markdown("---")
+    
+    # Lógica de Upload (Restore) - BEM VISÍVEL AGORA
+    arquivo_upload = st.file_uploader("📂 Restaurar Backup", type="json", help="Carregue um ficheiro .json guardado anteriormente.")
+    
+    if arquivo_upload is not None:
+        try:
+            conteudo = json.load(arquivo_upload)
+            # Restaurar itens na tabela
+            st.session_state.itens_orcamento = pd.DataFrame(conteudo["itens"])
+            st.success("Backup carregado com sucesso!")
+            # Nota: Para restaurar os campos de texto (Nome, Morada, etc), seria necessário
+            # usar chaves de estado para cada um, mas os itens já aparecerão na lista.
+            st.rerun()
+        except Exception as e:
+            st.error(f"Erro ao carregar backup: {e}")
 
 st.divider()
 
@@ -74,7 +111,6 @@ lista_artigos = base_dados.apply(lambda x: f"{x['CÓDIGO']} - {x['DESCRIÇÃO']}
 
 c_sel, c_uni, c_pre, c_qtd, c_add = st.columns([3, 0.6, 0.8, 0.8, 1])
 
-# Lógica para capturar dados do artigo ANTES de desenhar os inputs
 unid_def = ""
 preco_def = 0.0
 artigo_escolhido = c_sel.selectbox("Artigo:", options=[""] + lista_artigos, key="sel_artigo_main")
@@ -89,7 +125,6 @@ with c_uni:
     st.text_input("Unid.", value=unid_def, disabled=True, key=f"unid_{artigo_escolhido}")
 
 with c_pre:
-    # A 'key' dinâmica força o campo a resetar para o valor da tabela sempre que mudas o artigo
     preco_final = st.number_input("Preço Unit (€)", value=preco_def, format="%.2f", step=0.01, key=f"preco_{artigo_escolhido}")
 
 with c_qtd:
@@ -105,7 +140,7 @@ with c_add:
                 "CÓDIGO": cod_sel, 
                 "Artigo": desc_sel, 
                 "UNID": unid_def, 
-                "Preço Unitário": float(preco_final), # Aqui grava o valor que estiver na caixa (original ou editado)
+                "Preço Unitário": float(preco_final),
                 "Quantidade": float(qtd_val)
             }])
             st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
@@ -113,7 +148,7 @@ with c_add:
 
 st.divider()
 
-# --- SECÇÃO 2: ITEM EXTRA (IGUALMENTE COM 2 CASAS DECIMAIS) ---
+# --- SECÇÃO 2: ITEM EXTRA (MANUAL) ---
 st.subheader("✍️ 2. Item Extra (Manual)")
 c_art_ex, c_uni_ex, c_pre_ex, c_qtd_ex, c_add_ex = st.columns([3, 0.6, 0.8, 0.8, 1])
 with c_art_ex:
@@ -158,7 +193,6 @@ if not st.session_state.itens_orcamento.empty:
     iva_val = sub_val * (taxa_iva / 100)
     total_val = sub_val + iva_val
 
-    # Função PDF simplificada para manter consistência
     def criar_pdf(df, sub, iva_v, total_f, taxa):
         buf = io.BytesIO()
         doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20, bottomMargin=20)
@@ -200,4 +234,3 @@ if not st.session_state.itens_orcamento.empty:
     if c3.button("🗑️ Limpar Tudo", use_container_width=True):
         st.session_state.itens_orcamento = pd.DataFrame(columns=["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"])
         st.rerun()
-
