@@ -20,6 +20,7 @@ AZUL_LOGO = colors.Color(0/255, 115/255, 180/255)
 
 @st.cache_data(ttl=600)
 def carregar_base():
+    # Caminho do ficheiro (ajustado para o nome que forneceste)
     caminho = "Cópia de Preços Tabela atual.xlsx"
     if os.path.exists(caminho):
         try:
@@ -69,6 +70,7 @@ with col_rasc:
         carregados = json.load(u_backup)
         st.session_state.itens_orcamento = pd.DataFrame(carregados["itens"])
         st.success("Carregado!")
+        st.rerun()
 
 st.divider()
 
@@ -81,6 +83,12 @@ col_pesq, col_qtd, col_btn = st.columns([3, 0.8, 1])
 
 with col_pesq:
     escolha = st.selectbox("Pesquise o código ou nome do artigo:", options=[""] + lista_artigos, index=0)
+    
+    # SUGESTÃO IMPLEMENTADA: Visualização prévia antes de adicionar
+    if escolha:
+        cod_preview = escolha.split(" - ")[0]
+        row_preview = base[base["CÓDIGO"] == cod_preview].iloc[0]
+        st.info(f"**Info do Item:** Unidade: `{row_preview['UNID']}` | Preço Base: `{row_preview['Preço Unitário']:.2f}€`", icon="💡")
 
 with col_qtd:
     qtd_val = st.number_input("Qtd", min_value=0.01, value=1.0, step=0.5)
@@ -92,7 +100,13 @@ with col_btn:
 if btn_add and escolha:
     cod_sel = escolha.split(" - ")[0]
     row = base[base["CÓDIGO"] == cod_sel].iloc[0]
-    novo = pd.DataFrame([{"CÓDIGO": row["CÓDIGO"], "Artigo": row["DESCRIÇÃO"], "UNID": row["UNID"], "Preço Unitário": float(row["Preço Unitário"]), "Quantidade": qtd_val}])
+    novo = pd.DataFrame([{
+        "CÓDIGO": row["CÓDIGO"], 
+        "Artigo": row["DESCRIÇÃO"], 
+        "UNID": row["UNID"], 
+        "Preço Unitário": float(row["Preço Unitário"]), 
+        "Quantidade": qtd_val
+    }])
     st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
     st.rerun()
 
@@ -114,7 +128,8 @@ if not st.session_state.itens_orcamento.empty:
             "Subtotal": st.column_config.NumberColumn("Subtotal", format="%.2f €"),
             "Quantidade": st.column_config.NumberColumn("Quantidade", format="%.2f"),
         },
-        use_container_width=True, hide_index=True
+        use_container_width=True, hide_index=True,
+        num_rows="dynamic" # Permite apagar linhas diretamente na tabela
     )
     
     st.session_state.itens_orcamento = df_editado[["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"]]
@@ -164,14 +179,13 @@ if not st.session_state.itens_orcamento.empty:
             ('ALIGN', (1,0), (-1,-1), 'CENTER'),
             ('ALIGN', (3,0), (4,-1), 'RIGHT'),
             ('VALIGN', (0,0), (-1,-1), 'TOP'),
-            ('GRID', (0,0), (-1, num_itens), 0.5, colors.grey), # Grelha apenas nos itens
-            # Formatação Totais
+            ('GRID', (0,0), (-1, num_itens), 0.5, colors.grey),
             ('FONTNAME', (3, num_itens+1), (3, -1), 'Helvetica-Bold'),
             ('FONTSIZE', (3, num_itens+1), (-1, -1), 9),
             ('BOTTOMPADDING', (0, num_itens+1), (-1, -1), 5),
             ('TOPPADDING', (0, num_itens+1), (-1, -1), 5),
-            ('BACKGROUND', (3, -1), (4, -1), colors.lightgrey), # Fundo cinza no Total Final
-            ('BOX', (3, -1), (4, -1), 1, colors.black), # Caixa preta no Total Final
+            ('BACKGROUND', (3, -1), (4, -1), colors.lightgrey),
+            ('BOX', (3, -1), (4, -1), 1, colors.black),
         ]
         
         t.setStyle(TableStyle(estilos))
