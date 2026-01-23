@@ -55,66 +55,65 @@ with col_rasc:
 
 st.divider()
 
-# 3. ADIÇÃO DE ITENS (LAYOUT CORRIGIDO)
+# 3. ADIÇÃO DE ITENS (LAYOUT INDEPENDENTE PARA TABELA E MANUAL)
 st.subheader("🔍 1. Adicionar Itens")
 base = carregar_base()
 lista_artigos = base.apply(lambda x: f"{x['CÓDIGO']} - {x['DESCRIÇÃO']}", axis=1).tolist()
 
 with st.form("form_adicao", clear_on_submit=True):
-    # Primeira linha: Pesquisa na tabela e campos de suporte
-    col_pesq, col_unid, col_prec, col_qtd = st.columns([2.5, 0.5, 0.7, 0.6])
-    
+    # --- OPÇÃO A: PESQUISA NA TABELA ---
+    st.markdown("**Opção A: Selecionar da Tabela de Preços**")
+    col_pesq, col_qtd_tab, col_btn_tab = st.columns([3, 0.7, 1])
     with col_pesq:
-        escolha = st.selectbox("Pesquise na tabela:", options=[""] + lista_artigos, index=0)
-    
-    # Detetar valores padrão se algo for selecionado na lista
-    unid_val = "un"
-    preco_val = 0.0
-    if escolha:
-        cod_sel = escolha.split(" - ")[0]
-        unid_val = str(base[base["CÓDIGO"] == cod_sel]["UNID"].values[0])
-        preco_val = float(base[base["CÓDIGO"] == cod_sel]["Preço Unitário"].values[0])
-
-    with col_unid:
-        unid_input = st.text_input("Unid", value=unid_val)
-    with col_prec:
-        preco_input = st.number_input("Preço €", min_value=0.0, value=preco_val, step=0.01, format="%.2f")
-    with col_qtd:
-        qtd_input = st.number_input("Qtd", min_value=0.01, value=1.0)
-
-    # Segunda linha: Item manual e botão (Alinhados para suporte ao Enter)
-    col_man, col_btn = st.columns([3.7, 1])
-    with col_man:
-        item_manual = st.text_input("Ou escreva um item novo aqui (Enter para adicionar):", placeholder="Ex: Pintura de teto da sala")
-    with col_btn:
+        escolha = st.selectbox("Pesquise o código ou nome do artigo:", options=[""] + lista_artigos, index=0)
+    with col_qtd_tab:
+        qtd_tab = st.number_input("Qtd (Tabela)", min_value=0.01, value=1.0, key="qtd_tabela")
+    with col_btn_tab:
         st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-        add_click = st.form_submit_button("✅ Adicionar", use_container_width=True)
+        add_tab = st.form_submit_button("✅ Adicionar da Tabela", use_container_width=True)
 
-    if add_click:
-        desc_final = ""
-        cod_final = "EXTRA"
-        
-        if escolha:
-            cod_final = escolha.split(" - ")[0]
-            desc_final = escolha.split(" - ", 1)[1]
-        elif item_manual:
-            desc_final = item_manual
-            cod_final = "MANUAL"
-        
-        if desc_final:
-            novo_item = pd.DataFrame([{
-                "CÓDIGO": cod_final,
-                "Artigo": desc_final,
-                "UNID": unid_input,
-                "Preço Unitário": preco_input,
-                "Quantidade": qtd_input
-            }])
-            st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo_item], ignore_index=True)
-            st.rerun()
-        else:
-            st.error("Por favor, selecione um artigo ou descreva um item novo.")
+    st.markdown("---")
 
-# 4. RESUMO E PDF
+    # --- OPÇÃO B: ITEM MANUAL COM CAMPOS PRÓPRIOS ---
+    st.markdown("**Opção B: Adicionar Item Manual (Extra)**")
+    col_desc_man, col_unid_man, col_prec_man, col_qtd_man = st.columns([2, 0.5, 0.7, 0.6])
+    with col_desc_man:
+        item_manual = st.text_input("Descrição do Item Novo:", placeholder="Ex: Pintura de teto...")
+    with col_unid_man:
+        unid_man = st.text_input("Unid", value="un", key="u_man")
+    with col_prec_man:
+        prec_man = st.number_input("Preço €", min_value=0.0, value=0.0, step=0.01, format="%.2f", key="p_man")
+    with col_qtd_man:
+        qtd_man = st.number_input("Qtd", min_value=0.01, value=1.0, key="q_man")
+    
+    add_man = st.form_submit_button("➕ Adicionar Item Manual", use_container_width=True)
+
+    # LÓGICA DE ADIÇÃO
+    if add_tab and escolha:
+        cod_sel = escolha.split(" - ")[0]
+        row = base[base["CÓDIGO"] == cod_sel].iloc[0]
+        novo = pd.DataFrame([{
+            "CÓDIGO": row["CÓDIGO"],
+            "Artigo": row["DESCRIÇÃO"],
+            "UNID": row["UNID"],
+            "Preço Unitário": float(row["Preço Unitário"]),
+            "Quantidade": qtd_tab
+        }])
+        st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
+        st.rerun()
+
+    if add_man and item_manual:
+        novo_man = pd.DataFrame([{
+            "CÓDIGO": "MANUAL",
+            "Artigo": item_manual,
+            "UNID": unid_man,
+            "Preço Unitário": prec_man,
+            "Quantidade": qtd_man
+        }])
+        st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo_man], ignore_index=True)
+        st.rerun()
+
+# 4. RESUMO, IVA E PDF
 st.divider()
 if not st.session_state.itens_orcamento.empty:
     st.markdown("### 📋 Resumo")
