@@ -71,61 +71,62 @@ st.divider()
 
 # 3. ADIÇÃO DE ITENS
 st.subheader("🔍 1. Adicionar Itens")
-tab1, tab2 = st.tabs(["🔎 Pesquisar Excel (Escolha Pendente)", "➕ Manual"])
+tab1, tab2 = st.tabs(["🔎 Pesquisar Excel", "➕ Manual"])
 
 with tab1:
     base = carregar_base()
     lista_artigos = base.apply(lambda x: f"{x['CÓDIGO']} - {x['DESCRIÇÃO']}", axis=1).tolist()
     
-    escolha = st.selectbox(
-        "Pesquise o código ou nome do artigo:",
-        options=[""] + lista_artigos,
-        index=0,
-        help="Escreva para filtrar a lista automaticamente"
-    )
+    # CRIAÇÃO DA LINHA ÚNICA (Pesquisa, Qtd e Botão)
+    col_pesquisa, col_qtd, col_botao = st.columns([3, 0.8, 1])
+    
+    with col_pesquisa:
+        escolha = st.selectbox(
+            "Pesquise o código ou nome do artigo:",
+            options=[""] + lista_artigos,
+            index=0,
+            label_visibility="visible"
+        )
 
-    if escolha:
+    with col_qtd:
+        qtd_txt = st.text_input("Qtd", value="1", key="qtd_sel")
+
+    with col_botao:
+        # Alinhamento vertical para o botão
+        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+        btn_add = st.button("✅ Adicionar", use_container_width=True)
+
+    # Processamento após clique
+    if btn_add and escolha:
         cod_selecionado = escolha.split(" - ")[0]
         row = base[base["CÓDIGO"] == cod_selecionado].iloc[0]
         
-        st.info(f"**Selecionado:** {row['DESCRIÇÃO']} ({row['Preço Unitário']:.2f}€/{row['UNID']})")
-        
-        # COLOCA QUANTIDADE E BOTÃO NA MESMA LINHA
-        c_q, c_b = st.columns([1, 1])
-        
-        with c_q:
-            qtd_txt = st.text_input("Introduza a Quantidade", value="1", key="qtd_sel")
-        
-        with c_b:
-            # Espaçamento manual para alinhar o botão com o campo de texto
-            st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-            btn_add = st.button("✅ Adicionar ao Orçamento", use_container_width=True)
-        
-        if btn_add:
-            qtd_limpa = qtd_txt.replace(',', '.').strip()
-            try:
-                v = float(qtd_limpa)
-                if v > 0:
-                    novo = pd.DataFrame([{
-                        "CÓDIGO": row["CÓDIGO"], 
-                        "Artigo": row["DESCRIÇÃO"], 
-                        "UNID": row["UNID"], 
-                        "Preço Unitário": float(row["Preço Unitário"]), 
-                        "Quantidade": v
-                    }])
-                    st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
-                    st.rerun()
-                else:
-                    st.error("A quantidade deve ser superior a zero.")
-            except ValueError:
-                st.error("Quantidade inválida. Use números.")
+        qtd_limpa = qtd_txt.replace(',', '.').strip()
+        try:
+            v = float(qtd_limpa)
+            if v > 0:
+                novo = pd.DataFrame([{
+                    "CÓDIGO": row["CÓDIGO"], 
+                    "Artigo": row["DESCRIÇÃO"], 
+                    "UNID": row["UNID"], 
+                    "Preço Unitário": float(row["Preço Unitário"]), 
+                    "Quantidade": v
+                }])
+                st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
+                st.rerun()
+            else:
+                st.error("Qtd > 0")
+        except ValueError:
+            st.error("Erro na Qtd")
+    elif btn_add and not escolha:
+        st.warning("Selecione um artigo primeiro.")
 
 with tab2:
     m1, m2, m3, m4 = st.columns([3, 1, 1, 1])
     m_desc = m1.text_input("Descrição Manual")
     m_prec = m2.number_input("Preço €", min_value=0.0, step=0.01, format="%.2f")
     m_qtd = m3.number_input("Qtd", min_value=0.0, step=0.01, format="%.2f")
-    if m4.button("Adicionar Item"):
+    if m4.button("Adicionar Item Manual"):
         if m_desc and m_qtd > 0:
             nm = pd.DataFrame([{"CÓDIGO": "EXTRA", "Artigo": m_desc, "UNID": "un", "Preço Unitário": m_prec, "Quantidade": m_qtd}])
             st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, nm], ignore_index=True)
