@@ -15,7 +15,7 @@ from reportlab.lib.units import inch
 # 1. CONFIGURAÇÃO INICIAL
 st.set_page_config(page_title="Orçamentador Pro", layout="wide")
 
-@st.cache_data
+@st.cache_data(ttl=600)
 def carregar_base():
     caminho = "Cópia de Preços Tabela atual.xlsx"
     if os.path.exists(caminho):
@@ -26,10 +26,10 @@ def carregar_base():
             df = df[["CÓDIGO", "DESCRIÇÃO", "UNID", col_preco]].dropna(subset=["CÓDIGO"])
             df.rename(columns={col_preco: "Preço Unitário"}, inplace=True)
             df["CÓDIGO"] = df["CÓDIGO"].astype(str).str.strip()
-            # Garantir que o preço unitário é numérico
             df["Preço Unitário"] = pd.to_numeric(df["Preço Unitário"], errors='coerce').fillna(0.0)
             return df
-        except: pass
+        except Exception as e:
+            st.error(f"Erro ao ler Excel: {e}")
     return pd.DataFrame(columns=["CÓDIGO", "DESCRIÇÃO", "UNID", "Preço Unitário"])
 
 if "itens_orcamento" not in st.session_state:
@@ -71,44 +71,55 @@ st.divider()
 
 # 3. ADIÇÃO DE ITENS
 st.subheader("🔍 1. Adicionar Itens")
-tab1, tab2 = st.tabs(["🔎 Pesquisar Excel", "➕ Manual"])
+tab1, tab2 = st.tabs(["🔎 Pesquisar Excel (Escolha Pendente)", "➕ Manual"])
 
 with tab1:
-    termo = st.text_input("Pesquisar:", key="search").strip()
-    if termo:
-        base = carregar_base()
-        res = base[(base["DESCRIÇÃO"].str.contains(termo, case=False)) | (base["CÓDIGO"].str.contains(termo, case=False))].head(10)
+    base = carregar_base()
+    # Prepara a lista para o dropdown: "CÓDIGO - DESCRIÇÃO"
+    lista_artigos = base.apply(lambda x: f"{x['CÓDIGO']} - {x['DESCRIÇÃO']}", axis=1).tolist()
+    
+    escolha = st.selectbox(
+        "Pesquise o código ou nome do artigo:",
+        options=[""] + lista_artigos,
+        index=0,
+        help="Escreva para filtrar a lista automaticamente"
+    )
+
+    if escolha:
+        # Recupera os dados do item selecionado
+        cod_selecionado = escolha.split(" - ")[0]
+        row = base[base["CÓDIGO"] == cod_selecionado].iloc[0]
         
-        for i, row in res.iterrows():
-            c1, c2, c3, c4, c5 = st.columns([1, 4, 1, 1, 0.5])
-            c1.write(row["CÓDIGO"])
-            c2.write(row["DESCRIÇÃO"])
-            c3.write(f"{row['Preço Unitário']:.2f}€")
-            
-            qtd_in = c4.text_input("Qtd", key=f"q_{row['CÓDIGO']}", label_visibility="collapsed", placeholder="0")
-            
-            if c5.button("➕", key=f"b_{row['CÓDIGO']}"):
-                qtd_limpa = qtd_in.replace(',', '.').strip()
-                if not qtd_limpa:
-                    st.error("Insira a quantidade.")
+        st.info(f"**Selecionado:** {row['DESCRIÇÃO']} ({row['Preço Unitário']:.2f}€/{row['UNID']})")
+        
+        col_q, col_b = st.columns([1, 1])
+        qtd_txt = col_q.text_input("Introduza a Quantidade", value="1", key="qtd_sel")
+        
+        if col_b.button("✅ Adicionar ao Orçamento", use_container_width=True):
+            qtd_limpa = qtd_txt.replace(',', '.').strip()
+            try:
+                v = float(qtd_limpa)
+                if v > 0:
+                    novo = pd.DataFrame([{
+                        "CÓDIGO": row["CÓDIGO"], 
+                        "Artigo": row["DESCRIÇÃO"], 
+                        "UNID": row["UNID"], 
+                        "Preço Unitário": float(row["Preço Unitário"]), 
+                        "Quantidade": v
+                    }])
+                    st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
+                    st.rerun()
                 else:
-                    try:
-                        v = float(qtd_limpa)
-                        if v > 0:
-                            novo = pd.DataFrame([{"CÓDIGO": row["CÓDIGO"], "Artigo": row["DESCRIÇÃO"], "UNID": row["UNID"], "Preço Unitário": float(row["Preço Unitário"]), "Quantidade": v}])
-                            st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
-                            st.rerun()
-                        else:
-                            st.error("Qtd > 0")
-                    except ValueError:
-                        st.error("Número inválido")
+                    st.error("A quantidade deve ser superior a zero.")
+            except ValueError:
+                st.error("Quantidade inválida. Use números.")
 
 with tab2:
     m1, m2, m3, m4 = st.columns([3, 1, 1, 1])
     m_desc = m1.text_input("Descrição Manual")
     m_prec = m2.number_input("Preço €", min_value=0.0, step=0.01, format="%.2f")
     m_qtd = m3.number_input("Qtd", min_value=0.0, step=0.01, format="%.2f")
-    if m4.button("Adicionar"):
+    if m4.button("Adicionar Item"):
         if m_desc and m_qtd > 0:
             nm = pd.DataFrame([{"CÓDIGO": "EXTRA", "Artigo": m_desc, "UNID": "un", "Preço Unitário": m_prec, "Quantidade": m_qtd}])
             st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, nm], ignore_index=True)
@@ -118,17 +129,9 @@ with tab2:
 st.divider()
 if not st.session_state.itens_orcamento.empty:
     df_final = st.session_state.itens_orcamento.copy()
-    
-    # Garantir que as colunas são numéricas antes do cálculo
-    df_final["Quantidade"] = pd.to_numeric(df_final["Quantidade"], errors='coerce').fillna(0.0)
-    df_final["Preço Unitário"] = pd.to_numeric(df_final["Preço Unitário"], errors='coerce').fillna(0.0)
     df_final["Subtotal"] = df_final["Quantidade"] * df_final["Preço Unitário"]
     
-    # Configuração de exibição da tabela no Streamlit com símbolos e 2 casas decimais
-    df_exibicao = df_final.copy()
-    
-    # Aplicar formatação visual para a tabela do Streamlit
-    st.markdown("### 📋 Itens do Orçamento")
+    st.markdown("### 📋 Resumo do Orçamento")
     df_editado = st.data_editor(
         df_final,
         column_config={
@@ -140,23 +143,19 @@ if not st.session_state.itens_orcamento.empty:
         hide_index=True
     )
     
-    # Atualizar o estado com as edições feitas na tabela
     st.session_state.itens_orcamento = df_editado[["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"]]
-    
     total_val = df_editado["Subtotal"].sum()
-    st.write(f"### Total: {total_val:,.2f}€")
+    st.write(f"### **Total: {total_val:,.2f}€**")
 
     def criar_pdf(df, total):
         buf = io.BytesIO()
         doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20, bottomMargin=20)
         sty = getSampleStyleSheet()
-        
         estilo_tabela = sty['Normal']
         estilo_tabela.fontSize = 9
         estilo_tabela.leading = 11 
         
         elems = []
-        
         if os.path.exists("logo.png"):
             img = RLImage("logo.png", width=1.5*inch, height=0.8*inch)
             img.hAlign = 'LEFT'
@@ -169,14 +168,11 @@ if not st.session_state.itens_orcamento.empty:
         elems.append(Paragraph(cli_info, sty['Normal']))
         elems.append(Spacer(1, 20))
         
-        # Cabeçalho da Tabela
         data = [["Artigo / Descrição", "Qtd", "Unid", "Preço Unit.", "Total"]]
-        
         for _, r in df.iterrows():
-            artigo_formatado = Paragraph(str(r['Artigo']), estilo_tabela)
-            # Formatação de 2 casas decimais e símbolo de Euro para o PDF
+            art_p = Paragraph(str(r['Artigo']), estilo_tabela)
             data.append([
-                artigo_formatado, 
+                art_p, 
                 f"{float(r['Quantidade']):.2f}", 
                 r['UNID'], 
                 f"{float(r['Preço Unitário']):.2f}€", 
@@ -193,7 +189,7 @@ if not st.session_state.itens_orcamento.empty:
             ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
             ('BACKGROUND', (0,-1), (-1,-1), colors.lightgrey),
             ('ALIGN', (1,0), (-1,-1), 'CENTER'),
-            ('ALIGN', (3,0), (4,-1), 'RIGHT'), # Preços alinhados à direita
+            ('ALIGN', (3,0), (4,-1), 'RIGHT'),
             ('VALIGN', (0,0), (-1,-1), 'TOP'),
         ]))
         elems.append(t)
@@ -206,8 +202,6 @@ if not st.session_state.itens_orcamento.empty:
         return buf.getvalue()
 
     c_pdf, c_xls, c_limp = st.columns(3)
-    
-    # PDF utiliza o dataframe editado
     c_pdf.download_button("📥 Baixar PDF", data=criar_pdf(df_editado, total_val), file_name=f"{n_orc}.pdf", use_container_width=True)
     
     buf_x = io.BytesIO()
