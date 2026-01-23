@@ -72,15 +72,33 @@ with col_rasc:
 
 st.divider()
 
-# 3. ADIÇÃO DE ITENS
+# 3. ADIÇÃO DE ITENS (LÓGICA CORRIGIDA PARA EXIBIR UNID E PREÇO)
 st.subheader("🔍 1. Adicionar Itens")
 base = carregar_base()
 lista_artigos = base.apply(lambda x: f"{x['CÓDIGO']} - {x['DESCRIÇÃO']}", axis=1).tolist()
 
-col_pesq, col_qtd, col_btn = st.columns([3, 0.8, 1])
+# Criamos as colunas para o seletor e para mostrar os dados da tabela
+col_pesq, col_unid_view, col_preco_view, col_qtd, col_btn = st.columns([2.5, 0.5, 0.7, 0.6, 0.8])
 
 with col_pesq:
     escolha = st.selectbox("Pesquise o código ou nome do artigo:", options=[""] + lista_artigos, index=0)
+
+# Lógica para capturar os dados do Excel assim que selecionado
+unid_tabela = ""
+preco_tabela = 0.0
+if escolha:
+    cod_sel = escolha.split(" - ")[0]
+    match = base[base["CÓDIGO"] == cod_sel].iloc[0]
+    unid_tabela = str(match["UNID"])
+    preco_tabela = float(match["Preço Unitário"])
+
+with col_unid_view:
+    # Campo apenas para visualização da unidade que consta no Excel
+    st.text_input("Unid", value=unid_tabela, disabled=True, key="view_unid")
+
+with col_preco_view:
+    # Campo apenas para visualização do preço que consta no Excel
+    st.number_input("Preço €", value=preco_tabela, disabled=True, format="%.2f", key="view_preco")
 
 with col_qtd:
     qtd_val = st.number_input("Qtd", min_value=0.01, value=1.0, step=0.5)
@@ -92,7 +110,13 @@ with col_btn:
 if btn_add and escolha:
     cod_sel = escolha.split(" - ")[0]
     row = base[base["CÓDIGO"] == cod_sel].iloc[0]
-    novo = pd.DataFrame([{"CÓDIGO": row["CÓDIGO"], "Artigo": row["DESCRIÇÃO"], "UNID": row["UNID"], "Preço Unitário": float(row["Preço Unitário"]), "Quantidade": qtd_val}])
+    novo = pd.DataFrame([{
+        "CÓDIGO": row["CÓDIGO"], 
+        "Artigo": row["DESCRIÇÃO"], 
+        "UNID": row["UNID"], 
+        "Preço Unitário": float(row["Preço Unitário"]), 
+        "Quantidade": qtd_val
+    }])
     st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
     st.rerun()
 
@@ -123,6 +147,12 @@ if not st.session_state.itens_orcamento.empty:
     iva_val = sub_val * (taxa_iva / 100)
     total_val = sub_val + iva_val
 
+    # Metricas visuais de total
+    c_m1, c_m2, c_m3 = st.columns(3)
+    c_m1.metric("Subtotal", f"{sub_val:,.2f} €")
+    c_m2.metric(f"IVA ({taxa_iva}%)", f"{iva_val:,.2f} €")
+    c_m3.metric("TOTAL FINAL", f"{total_val:,.2f} €")
+
     def criar_pdf(df, sub, iva_v, total_f, taxa):
         buf = io.BytesIO()
         doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20, bottomMargin=20)
@@ -143,38 +173,27 @@ if not st.session_state.itens_orcamento.empty:
         elems.append(Paragraph(cli_info, sty['Normal']))
         elems.append(Spacer(1, 15))
         
-        # TABELA PRINCIPAL
         data = [["Artigo / Descrição", "Qtd", "Unid", "Preço Unit.", "Total"]]
         for _, r in df.iterrows():
-            data.append([Paragraph(str(r['Artigo']), est_tab), f"{r['Quantidade']:.2f}", r['UNID'], f"{r['Preço Unitário']:.2f}€", f"{r['Subtotal']:.2f}€"])
+            data.append([Paragraph(str(r['Artigo']), est_tab), f"{r['Quantidade']:.2f}", r['UNID'], f"{r['Preço Unitário']:.2f}€", f"{(r['Quantidade']*r['Preço Unitário']):.2f}€"])
         
         num_itens = len(df)
-        
-        # LINHAS DE TOTAIS
         data.append(["", "", "", "SUBTOTAL:", f"{sub:,.2f}€"])
         data.append(["", "", "", f"IVA ({taxa}%):", f"{iva_v:,.2f}€"])
         data.append(["", "", "", "TOTAL FINAL:", f"{total_f:,.2f}€"])
         
         t = Table(data, colWidths=[280, 45, 45, 75, 75])
-        
-        estilos = [
+        t.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), AZUL_LOGO),
             ('TEXTCOLOR', (0,0), (-1,0), colors.white),
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
             ('ALIGN', (1,0), (-1,-1), 'CENTER'),
             ('ALIGN', (3,0), (4,-1), 'RIGHT'),
             ('VALIGN', (0,0), (-1,-1), 'TOP'),
-            ('GRID', (0,0), (-1, num_itens), 0.5, colors.grey), # Grelha apenas nos itens
-            # Formatação Totais
+            ('GRID', (0,0), (-1, num_itens), 0.5, colors.grey),
             ('FONTNAME', (3, num_itens+1), (3, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (3, num_itens+1), (-1, -1), 9),
-            ('BOTTOMPADDING', (0, num_itens+1), (-1, -1), 5),
-            ('TOPPADDING', (0, num_itens+1), (-1, -1), 5),
-            ('BACKGROUND', (3, -1), (4, -1), colors.lightgrey), # Fundo cinza no Total Final
-            ('BOX', (3, -1), (4, -1), 1, colors.black), # Caixa preta no Total Final
-        ]
-        
-        t.setStyle(TableStyle(estilos))
+            ('BACKGROUND', (3, -1), (4, -1), colors.lightgrey),
+        ]))
         elems.append(t)
         
         if obs_cli:
@@ -186,7 +205,8 @@ if not st.session_state.itens_orcamento.empty:
 
     # Botões de Exportação
     c1, c2, c3 = st.columns(3)
-    c1.download_button("📥 Baixar PDF Corrigido", data=criar_pdf(df_editado, sub_val, iva_val, total_val, taxa_iva), file_name=f"{n_orc}.pdf", use_container_width=True)
+    pdf_data = criar_pdf(df_editado, sub_val, iva_val, total_val, taxa_iva)
+    c1.download_button("📥 Baixar PDF", data=pdf_data, file_name=f"{n_orc}.pdf", use_container_width=True)
     
     buf_x = io.BytesIO()
     with pd.ExcelWriter(buf_x, engine='xlsxwriter') as wr:
