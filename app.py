@@ -38,8 +38,8 @@ def carregar_base():
 if "itens_orcamento" not in st.session_state:
     st.session_state.itens_orcamento = pd.DataFrame(columns=["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"])
 
-# --- CABEÇALHO JMOS V 1.1 ---
-st.markdown("<h1 style='text-align: center; color: #0073B4;'>JMOS V 1.1</h1>", unsafe_allow_html=True)
+# --- CABEÇALHO JMOS V 1.2 ---
+st.markdown("<h1 style='text-align: center; color: #0073B4;'>JMOS V 1.2</h1>", unsafe_allow_html=True)
 
 if os.path.exists("logo.png"):
     col_l1, col_l2, col_l3 = st.columns([2, 1, 2])
@@ -200,3 +200,4 @@ if not st.session_state.itens_orcamento.empty:
     if c3.button("🗑️ Limpar Tudo", use_container_width=True):
         st.session_state.itens_orcamento = pd.DataFrame(columns=["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"])
         st.rerun()
+
