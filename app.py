@@ -15,6 +15,9 @@ from reportlab.lib.units import inch
 # 1. CONFIGURAÇÃO INICIAL
 st.set_page_config(page_title="Orçamentador Pro", layout="wide")
 
+# Cor institucional (Extraída do logo)
+AZUL_LOGO = colors.Color(0/255, 115/255, 180/255) 
+
 @st.cache_data(ttl=600)
 def carregar_base():
     caminho = "Cópia de Preços Tabela atual.xlsx"
@@ -61,106 +64,95 @@ with col_rasc:
     }
     st.download_button("📥 Guardar Backup", data=json.dumps(dados_backup), file_name=f"backup_{n_orc}.json", use_container_width=True)
     
-    u_backup = st.file_uploader("📂 Upload de Backup", type="json", label_visibility="collapsed")
+    u_backup = st.file_uploader("📂 Upload", type="json", label_visibility="collapsed")
     if u_backup:
         carregados = json.load(u_backup)
         st.session_state.itens_orcamento = pd.DataFrame(carregados["itens"])
-        st.success("Dados carregados!")
+        st.success("Carregado!")
 
 st.divider()
 
 # 3. ADIÇÃO DE ITENS
 st.subheader("🔍 1. Adicionar Itens")
-tab1, tab2 = st.tabs(["🔎 Pesquisar Excel", "➕ Manual"])
+tab1, tab2 = st.tabs(["🔎 Pesquisa Inteligente", "➕ Introdução Manual"])
 
 with tab1:
     base = carregar_base()
     lista_artigos = base.apply(lambda x: f"{x['CÓDIGO']} - {x['DESCRIÇÃO']}", axis=1).tolist()
     
-    # CRIAÇÃO DA LINHA ÚNICA (Pesquisa, Qtd e Botão)
     col_pesquisa, col_qtd, col_botao = st.columns([3, 0.8, 1])
     
     with col_pesquisa:
-        escolha = st.selectbox(
-            "Pesquise o código ou nome do artigo:",
-            options=[""] + lista_artigos,
-            index=0,
-            label_visibility="visible"
-        )
+        escolha = st.selectbox("Pesquise o código ou nome:", options=[""] + lista_artigos, index=0)
 
     with col_qtd:
         qtd_txt = st.text_input("Qtd", value="1", key="qtd_sel")
 
     with col_botao:
-        # Alinhamento vertical para o botão
         st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
         btn_add = st.button("✅ Adicionar", use_container_width=True)
 
-    # Processamento após clique
     if btn_add and escolha:
-        cod_selecionado = escolha.split(" - ")[0]
-        row = base[base["CÓDIGO"] == cod_selecionado].iloc[0]
-        
-        qtd_limpa = qtd_txt.replace(',', '.').strip()
+        cod_sel = escolha.split(" - ")[0]
+        row = base[base["CÓDIGO"] == cod_sel].iloc[0]
         try:
-            v = float(qtd_limpa)
+            v = float(qtd_txt.replace(',', '.'))
             if v > 0:
-                novo = pd.DataFrame([{
-                    "CÓDIGO": row["CÓDIGO"], 
-                    "Artigo": row["DESCRIÇÃO"], 
-                    "UNID": row["UNID"], 
-                    "Preço Unitário": float(row["Preço Unitário"]), 
-                    "Quantidade": v
-                }])
+                novo = pd.DataFrame([{"CÓDIGO": row["CÓDIGO"], "Artigo": row["DESCRIÇÃO"], "UNID": row["UNID"], "Preço Unitário": float(row["Preço Unitário"]), "Quantidade": v}])
                 st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
                 st.rerun()
-            else:
-                st.error("Qtd > 0")
-        except ValueError:
-            st.error("Erro na Qtd")
-    elif btn_add and not escolha:
-        st.warning("Selecione um artigo primeiro.")
+        except: st.error("Erro na Qtd")
 
 with tab2:
     m1, m2, m3, m4 = st.columns([3, 1, 1, 1])
-    m_desc = m1.text_input("Descrição Manual")
-    m_prec = m2.number_input("Preço €", min_value=0.0, step=0.01, format="%.2f")
-    m_qtd = m3.number_input("Qtd", min_value=0.0, step=0.01, format="%.2f")
-    if m4.button("Adicionar Item Manual"):
+    m_desc = m1.text_input("Descrição")
+    m_prec = m2.number_input("Preço €", min_value=0.0, step=0.01)
+    m_qtd = m3.number_input("Qtd", min_value=0.0, step=0.01)
+    if m4.button("Adicionar Manual"):
         if m_desc and m_qtd > 0:
             nm = pd.DataFrame([{"CÓDIGO": "EXTRA", "Artigo": m_desc, "UNID": "un", "Preço Unitário": m_prec, "Quantidade": m_qtd}])
             st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, nm], ignore_index=True)
             st.rerun()
 
-# 4. TABELA FINAL E EXPORTAÇÕES
+# 4. RESUMO E GESTÃO DE IMPOSTOS (IVA)
 st.divider()
 if not st.session_state.itens_orcamento.empty:
+    st.markdown("### 📋 Resumo do Orçamento")
+    
+    # Seletor de IVA
+    col_iva_sel, col_empty = st.columns([1, 4])
+    taxa_iva = col_iva_sel.selectbox("Taxa de IVA Aplicável:", [23, 13, 6, 0], format_func=lambda x: f"{x}%" if x > 0 else "Isento")
+
     df_final = st.session_state.itens_orcamento.copy()
     df_final["Subtotal"] = df_final["Quantidade"] * df_final["Preço Unitário"]
     
-    st.markdown("### 📋 Resumo do Orçamento")
     df_editado = st.data_editor(
         df_final,
         column_config={
             "Preço Unitário": st.column_config.NumberColumn("Preço Unitário", format="%.2f €"),
-            "Quantidade": st.column_config.NumberColumn("Quantidade", format="%.2f"),
             "Subtotal": st.column_config.NumberColumn("Subtotal", format="%.2f €"),
         },
-        use_container_width=True,
-        hide_index=True
+        use_container_width=True, hide_index=True
     )
     
     st.session_state.itens_orcamento = df_editado[["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"]]
-    total_val = df_editado["Subtotal"].sum()
-    st.write(f"### **Total: {total_val:,.2f}€**")
+    
+    # Cálculos Totais
+    subtotal_geral = df_editado["Subtotal"].sum()
+    valor_iva = subtotal_geral * (taxa_iva / 100)
+    total_com_iva = subtotal_geral + valor_iva
 
-    def criar_pdf(df, total):
+    c_t1, c_t2, c_t3 = st.columns(3)
+    c_t1.metric("Subtotal (S/ IVA)", f"{subtotal_geral:,.2f}€")
+    c_t2.metric(f"IVA ({taxa_iva}%)", f"{valor_iva:,.2f}€")
+    c_t3.metric("TOTAL FINAL", f"{total_com_iva:,.2f}€")
+
+    def criar_pdf(df, sub, iva_v, total_f, taxa):
         buf = io.BytesIO()
         doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=20, bottomMargin=20)
         sty = getSampleStyleSheet()
-        estilo_tabela = sty['Normal']
-        estilo_tabela.fontSize = 9
-        estilo_tabela.leading = 11 
+        est_tab = sty['Normal']
+        est_tab.fontSize = 8
         
         elems = []
         if os.path.exists("logo.png"):
@@ -171,33 +163,31 @@ if not st.session_state.itens_orcamento.empty:
         elems.append(Paragraph(f"ORÇAMENTO: {n_orc}", sty['Title']))
         elems.append(Spacer(1, 10))
         
-        cli_info = f"<b>Cliente:</b> {nome_cli}<br/><b>Morada:</b> {morada_cli}<br/><b>Tel:</b> {tel_cli}<br/><b>Email:</b> {email_cli}"
+        cli_info = f"<b>Cliente:</b> {nome_cli}<br/><b>Morada:</b> {morada_cli}<br/><b>Email:</b> {email_cli}"
         elems.append(Paragraph(cli_info, sty['Normal']))
-        elems.append(Spacer(1, 20))
+        elems.append(Spacer(1, 15))
         
+        # TABELA COM CABEÇALHO AZUL
         data = [["Artigo / Descrição", "Qtd", "Unid", "Preço Unit.", "Total"]]
         for _, r in df.iterrows():
-            art_p = Paragraph(str(r['Artigo']), estilo_tabela)
-            data.append([
-                art_p, 
-                f"{float(r['Quantidade']):.2f}", 
-                r['UNID'], 
-                f"{float(r['Preço Unitário']):.2f}€", 
-                f"{(float(r['Quantidade']) * float(r['Preço Unitário'])):.2f}€"
-            ])
+            data.append([Paragraph(str(r['Artigo']), est_tab), f"{r['Quantidade']:.2f}", r['UNID'], f"{r['Preço Unitário']:.2f}€", f"{r['Subtotal']:.2f}€"])
         
-        data.append(["", "", "", "TOTAL:", f"{total:,.2f}€"])
+        # Rodapé da tabela com impostos
+        data.append(["", "", "", "SUBTOTAL:", f"{sub:,.2f}€"])
+        data.append(["", "", "", f"IVA ({taxa}%):", f"{iva_v:,.2f}€"])
+        data.append(["", "", "", "TOTAL FINAL:", f"{total_f:,.2f}€"])
         
         t = Table(data, colWidths=[280, 45, 45, 65, 65])
         t.setStyle(TableStyle([
-            ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-            ('BACKGROUND', (0,0), (-1,0), colors.whitesmoke),
+            ('GRID', (0,0), (-1,-3), 0.5, colors.grey),
+            ('BACKGROUND', (0,0), (-1,0), AZUL_LOGO), # AZUL DO LOGO
+            ('TEXTCOLOR', (0,0), (-1,0), colors.white), # TEXTO BRANCO NO CABEÇALHO
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-            ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
-            ('BACKGROUND', (0,-1), (-1,-1), colors.lightgrey),
             ('ALIGN', (1,0), (-1,-1), 'CENTER'),
             ('ALIGN', (3,0), (4,-1), 'RIGHT'),
             ('VALIGN', (0,0), (-1,-1), 'TOP'),
+            ('FONTNAME', (0,-1), (-1,-1), 'Helvetica-Bold'),
+            ('BACKGROUND', (3,-1), (-1,-1), colors.lightgrey),
         ]))
         elems.append(t)
         
@@ -208,14 +198,14 @@ if not st.session_state.itens_orcamento.empty:
         doc.build(elems)
         return buf.getvalue()
 
-    c_pdf, c_xls, c_limp = st.columns(3)
-    c_pdf.download_button("📥 Baixar PDF", data=criar_pdf(df_editado, total_val), file_name=f"{n_orc}.pdf", use_container_width=True)
+    c1, c2, c3 = st.columns(3)
+    c1.download_button("📥 Baixar PDF Estilizado", data=criar_pdf(df_editado, subtotal_geral, valor_iva, total_com_iva, taxa_iva), file_name=f"{n_orc}.pdf", use_container_width=True)
     
     buf_x = io.BytesIO()
     with pd.ExcelWriter(buf_x, engine='xlsxwriter') as wr:
         df_editado.to_excel(wr, index=False)
-    c_xls.download_button("📊 Baixar Excel", data=buf_x.getvalue(), file_name=f"{n_orc}.xlsx", use_container_width=True)
+    c2.download_button("📊 Baixar Excel", data=buf_x.getvalue(), file_name=f"{n_orc}.xlsx", use_container_width=True)
 
-    if c_limp.button("🗑️ Limpar Tudo", use_container_width=True):
+    if c3.button("🗑️ Limpar Tudo", use_container_width=True):
         st.session_state.itens_orcamento = pd.DataFrame(columns=["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"])
         st.rerun()
