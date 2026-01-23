@@ -72,16 +72,15 @@ with col_rasc:
 
 st.divider()
 
-# --- SECÇÃO 1: ITENS DA TABELA ---
+# --- SECÇÃO 1: ITENS DA TABELA (CORRIGIDA) ---
 st.subheader("🔍 1. Adicionar Itens da Tabela")
 base = carregar_base()
 lista_artigos = base.apply(lambda x: f"{x['CÓDIGO']} - {x['DESCRIÇÃO']}", axis=1).tolist()
 
-c_sel, c_uni, c_pre, c_qtd, c_add = st.columns([2.5, 0.6, 0.8, 0.6, 0.8])
+# 1. Primeiro definimos a seleção
+escolha = st.selectbox("Artigo da Tabela:", options=[""] + lista_artigos, index=0)
 
-with c_sel:
-    escolha = st.selectbox("Artigo da Tabela:", options=[""] + lista_artigos, index=0)
-
+# 2. Procuramos os dados ANTES de desenhar as colunas
 unidade_ver = ""
 preco_ver = 0.0
 if escolha:
@@ -90,19 +89,28 @@ if escolha:
     unidade_ver = str(row_temp["UNID"])
     preco_ver = float(row_temp["Preço Unitário"])
 
+# 3. Agora desenhamos as colunas com os valores já capturados
+c_uni, c_pre, c_qtd, c_add = st.columns([1, 1, 1, 1])
+
 with c_uni:
-    st.text_input("Unid.", value=unidade_ver, disabled=True, key="uni_tab")
+    st.text_input("Unid.", value=unidade_ver, disabled=True, key="uni_tab_fixed")
 with c_pre:
-    st.text_input("Preço Unit.", value=f"{preco_ver:.2f} €" if escolha else "", disabled=True, key="pre_tab")
+    st.text_input("Preço Unit.", value=f"{preco_ver:.2f} €" if escolha else "", disabled=True, key="pre_tab_fixed")
 with c_qtd:
-    qtd_val = st.number_input("Qtd", min_value=0.01, value=1.0, step=0.5, key="qtd_tab")
+    qtd_val = st.number_input("Qtd", min_value=0.01, value=1.0, step=0.5, key="qtd_tab_fixed")
 with c_add:
     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
     if st.button("✅ Adicionar Tabela", use_container_width=True):
         if escolha:
             cod_sel = escolha.split(" - ")[0]
             row = base[base["CÓDIGO"] == cod_sel].iloc[0]
-            novo = pd.DataFrame([{"CÓDIGO": row["CÓDIGO"], "Artigo": row["DESCRIÇÃO"], "UNID": row["UNID"], "Preço Unitário": float(row["Preço Unitário"]), "Quantidade": qtd_val}])
+            novo = pd.DataFrame([{
+                "CÓDIGO": row["CÓDIGO"], 
+                "Artigo": row["DESCRIÇÃO"], 
+                "UNID": row["UNID"], 
+                "Preço Unitário": float(row["Preço Unitário"]), 
+                "Quantidade": qtd_val
+            }])
             st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
             st.rerun()
 
@@ -110,7 +118,6 @@ st.divider()
 
 # --- SECÇÃO 2: ITEM EXTRA (FORA DA TABELA) ---
 st.subheader("✍️ 2. Item Extra (Manual)")
-# Criamos campos abertos para o utilizador escrever o que quiser
 c_art_ex, c_uni_ex, c_pre_ex, c_qtd_ex, c_add_ex = st.columns([2.5, 0.6, 0.8, 0.6, 0.8])
 
 with c_art_ex:
@@ -134,8 +141,6 @@ with c_add_ex:
             }])
             st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo_extra], ignore_index=True)
             st.rerun()
-        else:
-            st.warning("Escreva uma descrição para o artigo extra.")
 
 # 4. RESUMO E GESTÃO DE IVA
 st.divider()
