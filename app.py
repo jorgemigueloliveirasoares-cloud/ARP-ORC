@@ -54,18 +54,19 @@ def atualizar_campos():
         st.session_state.unid_preview = ""
         st.session_state.preco_preview = ""
 
-# --- NOVO CABEÇALHO JMOS V 1.1 ---
+# --- CABEÇALHO JMOS V 1.1 ---
 st.markdown("<h1 style='text-align: center; color: #0073B4;'>JMOS V 1.1</h1>", unsafe_allow_html=True)
 
-# LOGO MAIOR E CENTRALIZADO
+# LOGO REDUZIDO PARA METADE E CENTRALIZADO
 if os.path.exists("logo.png"):
-    col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
+    # Criamos colunas para centralizar o logo, mas a coluna central agora é mais estreita (1)
+    col_l1, col_l2, col_l3 = st.columns([2, 1, 2])
     with col_l2:
-        st.image("logo.png", use_container_width=True) # Logo ocupa a largura da coluna central
+        st.image("logo.png", use_container_width=True)
 
 st.divider()
 
-# 2. DADOS DO CLIENTE (AGORA ABAIXO DO LOGO)
+# 2. DADOS DO CLIENTE
 col_cli, col_rasc = st.columns([3, 1.2])
 
 with col_cli:
@@ -161,9 +162,9 @@ if not st.session_state.itens_orcamento.empty:
         est_tab.fontSize = 8
         
         elems = []
-        # LOGO NO PDF MAIOR
+        # LOGO NO PDF REDUZIDO PARA METADE (1.25 polegadas)
         if os.path.exists("logo.png"):
-            img = RLImage("logo.png", width=2.5*inch, height=1.2*inch) # Aumentado o tamanho no PDF
+            img = RLImage("logo.png", width=1.25*inch, height=0.6*inch)
             img.hAlign = 'CENTER'
             elems.append(img)
             
