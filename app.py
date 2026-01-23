@@ -55,7 +55,7 @@ with col_rasc:
 
 st.divider()
 
-# 3. ADIÇÃO DE ITENS (LAYOUT INDEPENDENTE PARA TABELA E MANUAL)
+# 3. ADIÇÃO DE ITENS (OPÇÃO A COM UNIDADE E PREÇO VISÍVEIS)
 st.subheader("🔍 1. Adicionar Itens")
 base = carregar_base()
 lista_artigos = base.apply(lambda x: f"{x['CÓDIGO']} - {x['DESCRIÇÃO']}", axis=1).tolist()
@@ -63,18 +63,32 @@ lista_artigos = base.apply(lambda x: f"{x['CÓDIGO']} - {x['DESCRIÇÃO']}", axi
 with st.form("form_adicao", clear_on_submit=True):
     # --- OPÇÃO A: PESQUISA NA TABELA ---
     st.markdown("**Opção A: Selecionar da Tabela de Preços**")
-    col_pesq, col_qtd_tab, col_btn_tab = st.columns([3, 0.7, 1])
+    
+    col_pesq, col_unid_t, col_prec_t, col_qtd_t = st.columns([2, 0.5, 0.7, 0.6])
+    
     with col_pesq:
         escolha = st.selectbox("Pesquise o código ou nome do artigo:", options=[""] + lista_artigos, index=0)
-    with col_qtd_tab:
-        qtd_tab = st.number_input("Qtd (Tabela)", min_value=0.01, value=1.0, key="qtd_tabela")
-    with col_btn_tab:
-        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-        add_tab = st.form_submit_button("✅ Adicionar da Tabela", use_container_width=True)
+    
+    # Lógica para mostrar Unid e Preço da Tabela
+    u_tab_val, p_tab_val = "", 0.0
+    if escolha:
+        c_sel = escolha.split(" - ")[0]
+        match = base[base["CÓDIGO"] == c_sel].iloc[0]
+        u_tab_val = str(match["UNID"])
+        p_tab_val = float(match["Preço Unitário"])
+
+    with col_unid_t:
+        st.text_input("Unid (Tabela)", value=u_tab_val, disabled=True, key="ut")
+    with col_prec_t:
+        st.number_input("Preço Unit. €", value=p_tab_val, disabled=True, format="%.2f", key="pt")
+    with col_qtd_t:
+        qtd_tab = st.number_input("Qtd", min_value=0.01, value=1.0, key="qtd_t")
+
+    add_tab = st.form_submit_button("✅ Adicionar da Tabela", use_container_width=True)
 
     st.markdown("---")
 
-    # --- OPÇÃO B: ITEM MANUAL COM CAMPOS PRÓPRIOS ---
+    # --- OPÇÃO B: ITEM MANUAL ---
     st.markdown("**Opção B: Adicionar Item Manual (Extra)**")
     col_desc_man, col_unid_man, col_prec_man, col_qtd_man = st.columns([2, 0.5, 0.7, 0.6])
     with col_desc_man:
@@ -88,10 +102,10 @@ with st.form("form_adicao", clear_on_submit=True):
     
     add_man = st.form_submit_button("➕ Adicionar Item Manual", use_container_width=True)
 
-    # LÓGICA DE ADIÇÃO
+    # PROCESSAMENTO
     if add_tab and escolha:
-        cod_sel = escolha.split(" - ")[0]
-        row = base[base["CÓDIGO"] == cod_sel].iloc[0]
+        c_sel = escolha.split(" - ")[0]
+        row = base[base["CÓDIGO"] == c_sel].iloc[0]
         novo = pd.DataFrame([{
             "CÓDIGO": row["CÓDIGO"],
             "Artigo": row["DESCRIÇÃO"],
@@ -113,7 +127,7 @@ with st.form("form_adicao", clear_on_submit=True):
         st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo_man], ignore_index=True)
         st.rerun()
 
-# 4. RESUMO, IVA E PDF
+# 4. TABELA DE RESUMO E PDF (Layout Profissional)
 st.divider()
 if not st.session_state.itens_orcamento.empty:
     st.markdown("### 📋 Resumo")
