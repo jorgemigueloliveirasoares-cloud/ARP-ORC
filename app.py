@@ -72,72 +72,75 @@ with col_rasc:
 
 st.divider()
 
-# --- SECÇÃO 1: ITENS DA TABELA (CORRIGIDA) ---
+# --- 3. ADIÇÃO DE ITENS (LAYOUT ORIGINAL EM LINHA RECUPERADO) ---
 st.subheader("🔍 1. Adicionar Itens da Tabela")
 base = carregar_base()
 lista_artigos = base.apply(lambda x: f"{x['CÓDIGO']} - {x['DESCRIÇÃO']}", axis=1).tolist()
 
-# 1. Primeiro definimos a seleção
-escolha = st.selectbox("Artigo da Tabela:", options=[""] + lista_artigos, index=0)
+# Recuperamos as colunas originais para ficar tudo na mesma linha
+c_sel, c_uni, c_pre, c_qtd, c_add = st.columns([2.5, 0.6, 0.8, 0.6, 0.8])
 
-# 2. Procuramos os dados ANTES de desenhar as colunas
-unidade_ver = ""
-preco_ver = 0.0
+with c_sel:
+    escolha = st.selectbox("Artigo:", options=[""] + lista_artigos, index=0, key="sel_principal")
+
+# Lógica para detetar a mudança e extrair os valores imediatamente
+unidade_exibir = ""
+preco_exibir = ""
 if escolha:
     cod_temp = escolha.split(" - ")[0]
     row_temp = base[base["CÓDIGO"] == cod_temp].iloc[0]
-    unidade_ver = str(row_temp["UNID"])
-    preco_ver = float(row_temp["Preço Unitário"])
-
-# 3. Agora desenhamos as colunas com os valores já capturados
-c_uni, c_pre, c_qtd, c_add = st.columns([1, 1, 1, 1])
+    unidade_exibir = str(row_temp["UNID"])
+    preco_exibir = f"{float(row_temp['Preço Unitário']):.2f} €"
 
 with c_uni:
-    st.text_input("Unid.", value=unidade_ver, disabled=True, key="uni_tab_fixed")
+    # Mostra a unidade em caixa cinzenta
+    st.text_input("Unid.", value=unidade_exibir, disabled=True, key="unid_view")
+
 with c_pre:
-    st.text_input("Preço Unit.", value=f"{preco_ver:.2f} €" if escolha else "", disabled=True, key="pre_tab_fixed")
+    # Mostra o preço em caixa cinzenta
+    st.text_input("Preço Unit.", value=preco_exibir, disabled=True, key="preco_view")
+
 with c_qtd:
-    qtd_val = st.number_input("Qtd", min_value=0.01, value=1.0, step=0.5, key="qtd_tab_fixed")
+    qtd_val = st.number_input("Qtd", min_value=0.01, value=1.0, step=0.5, key="qtd_input")
+
 with c_add:
     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-    if st.button("✅ Adicionar Tabela", use_container_width=True):
-        if escolha:
-            cod_sel = escolha.split(" - ")[0]
-            row = base[base["CÓDIGO"] == cod_sel].iloc[0]
-            novo = pd.DataFrame([{
-                "CÓDIGO": row["CÓDIGO"], 
-                "Artigo": row["DESCRIÇÃO"], 
-                "UNID": row["UNID"], 
-                "Preço Unitário": float(row["Preço Unitário"]), 
-                "Quantidade": qtd_val
-            }])
-            st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
-            st.rerun()
+    btn_add = st.button("✅ Adicionar", use_container_width=True, key="btn_add_tab")
+
+if btn_add and escolha:
+    cod_sel = escolha.split(" - ")[0]
+    row = base[base["CÓDIGO"] == cod_sel].iloc[0]
+    novo = pd.DataFrame([{
+        "CÓDIGO": row["CÓDIGO"], 
+        "Artigo": row["DESCRIÇÃO"], 
+        "UNID": row["UNID"], 
+        "Preço Unitário": float(row["Preço Unitário"]), 
+        "Quantidade": qtd_val
+    }])
+    st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
+    st.rerun()
 
 st.divider()
 
-# --- SECÇÃO 2: ITEM EXTRA (FORA DA TABELA) ---
+# --- ITEM EXTRA (MANUAL) ---
 st.subheader("✍️ 2. Item Extra (Manual)")
 c_art_ex, c_uni_ex, c_pre_ex, c_qtd_ex, c_add_ex = st.columns([2.5, 0.6, 0.8, 0.6, 0.8])
 
 with c_art_ex:
-    artigo_extra = st.text_input("Descrição do Artigo Extra:", placeholder="Ex: Mão-de-obra especial...")
+    artigo_extra = st.text_input("Descrição do Artigo Extra:", placeholder="Ex: Mão-de-obra...")
 with c_uni_ex:
-    unidade_extra = st.text_input("Unid:", placeholder="un", key="uni_ex")
+    unidade_extra = st.text_input("Unid:", key="uni_ex_man")
 with c_pre_ex:
-    preco_extra = st.number_input("Preço Unit (€):", min_value=0.0, value=0.0, step=1.0, key="pre_ex")
+    preco_extra = st.number_input("Preço Unit (€):", min_value=0.0, key="pre_ex_man")
 with c_qtd_ex:
-    qtd_extra = st.number_input("Qtd:", min_value=0.01, value=1.0, step=1.0, key="qtd_ex")
+    qtd_extra = st.number_input("Qtd:", min_value=0.01, value=1.0, key="qtd_ex_man")
 with c_add_ex:
     st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-    if st.button("➕ Adicionar Extra", use_container_width=True):
+    if st.button("➕ Adicionar Extra", use_container_width=True, key="btn_add_man"):
         if artigo_extra:
             novo_extra = pd.DataFrame([{
-                "CÓDIGO": "EXTRA", 
-                "Artigo": artigo_extra, 
-                "UNID": unidade_extra, 
-                "Preço Unitário": float(preco_extra), 
-                "Quantidade": qtd_extra
+                "CÓDIGO": "EXTRA", "Artigo": artigo_extra, "UNID": unidade_extra, 
+                "Preço Unitário": float(preco_extra), "Quantidade": qtd_extra
             }])
             st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo_extra], ignore_index=True)
             st.rerun()
@@ -160,8 +163,7 @@ if not st.session_state.itens_orcamento.empty:
             "Subtotal": st.column_config.NumberColumn("Subtotal", format="%.2f €"),
             "Quantidade": st.column_config.NumberColumn("Quantidade", format="%.2f"),
         },
-        use_container_width=True, hide_index=True,
-        num_rows="dynamic"
+        use_container_width=True, hide_index=True, num_rows="dynamic"
     )
     
     st.session_state.itens_orcamento = df_editado[["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"]]
