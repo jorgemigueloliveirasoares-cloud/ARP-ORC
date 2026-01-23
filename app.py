@@ -23,6 +23,7 @@ def carregar_base():
         try:
             df = pd.read_excel(caminho)
             df.columns = [str(c).strip() for c in df.columns]
+            # Coluna de preço conforme o seu ficheiro
             col_preco = "VALORES ATUAIS JANEIRO 2025" 
             df = df[["CÓDIGO", "DESCRIÇÃO", "UNID", col_preco]].dropna(subset=["CÓDIGO"])
             df.rename(columns={col_preco: "Preço Unitário"}, inplace=True)
@@ -48,28 +49,27 @@ with col_cli:
     tel_cli = c1.text_input("Telefone")
     email_cli = c2.text_input("Email")
 with col_rasc:
-    st.subheader("💾 Backup")
+    st.subheader("💾 Sistema")
     n_orc = st.text_input("Nº Orçamento", value=f"ORC-{date.today().year}-001")
     dados_backup = {"cliente": {"nome": nome_cli, "n_orc": n_orc}, "itens": st.session_state.itens_orcamento.to_dict(orient="records")}
-    st.download_button("📥 Backup", data=json.dumps(dados_backup), file_name=f"{n_orc}.json", use_container_width=True)
+    st.download_button("📥 Exportar JSON", data=json.dumps(dados_backup), file_name=f"{n_orc}.json", use_container_width=True)
 
 st.divider()
 
-# 3. ADIÇÃO DE ITENS (OPÇÃO A COM UNIDADE E PREÇO VISÍVEIS)
+# 3. ADIÇÃO DE ITENS
 st.subheader("🔍 1. Adicionar Itens")
 base = carregar_base()
 lista_artigos = base.apply(lambda x: f"{x['CÓDIGO']} - {x['DESCRIÇÃO']}", axis=1).tolist()
 
 with st.form("form_adicao", clear_on_submit=True):
-    # --- OPÇÃO A: PESQUISA NA TABELA ---
+    # --- OPÇÃO A: SELEÇÃO DA TABELA ---
     st.markdown("**Opção A: Selecionar da Tabela de Preços**")
-    
     col_pesq, col_unid_t, col_prec_t, col_qtd_t = st.columns([2, 0.5, 0.7, 0.6])
     
     with col_pesq:
         escolha = st.selectbox("Pesquise o código ou nome do artigo:", options=[""] + lista_artigos, index=0)
     
-    # Lógica para mostrar Unid e Preço da Tabela
+    # Busca automática de dados da tabela
     u_tab_val, p_tab_val = "", 0.0
     if escolha:
         c_sel = escolha.split(" - ")[0]
@@ -78,11 +78,11 @@ with st.form("form_adicao", clear_on_submit=True):
         p_tab_val = float(match["Preço Unitário"])
 
     with col_unid_t:
-        st.text_input("Unid (Tabela)", value=u_tab_val, disabled=True, key="ut")
+        st.text_input("Unid (Tabela)", value=u_tab_val, disabled=True, key="ut_display")
     with col_prec_t:
-        st.number_input("Preço Unit. €", value=p_tab_val, disabled=True, format="%.2f", key="pt")
+        st.number_input("Preço Unit. €", value=p_tab_val, disabled=True, format="%.2f", key="pt_display")
     with col_qtd_t:
-        qtd_tab = st.number_input("Qtd", min_value=0.01, value=1.0, key="qtd_t")
+        qtd_tab = st.number_input("Qtd", min_value=0.01, value=1.0, key="qtd_t_input")
 
     add_tab = st.form_submit_button("✅ Adicionar da Tabela", use_container_width=True)
 
@@ -94,15 +94,15 @@ with st.form("form_adicao", clear_on_submit=True):
     with col_desc_man:
         item_manual = st.text_input("Descrição do Item Novo:", placeholder="Ex: Pintura de teto...")
     with col_unid_man:
-        unid_man = st.text_input("Unid", value="un", key="u_man")
+        unid_man = st.text_input("Unid", value="un", key="u_man_input")
     with col_prec_man:
-        prec_man = st.number_input("Preço €", min_value=0.0, value=0.0, step=0.01, format="%.2f", key="p_man")
+        prec_man = st.number_input("Preço €", min_value=0.0, value=0.0, step=0.01, format="%.2f", key="p_man_input")
     with col_qtd_man:
-        qtd_man = st.number_input("Qtd", min_value=0.01, value=1.0, key="q_man")
+        qtd_man = st.number_input("Qtd", min_value=0.01, value=1.0, key="q_man_input")
     
     add_man = st.form_submit_button("➕ Adicionar Item Manual", use_container_width=True)
 
-    # PROCESSAMENTO
+    # Lógica de processamento
     if add_tab and escolha:
         c_sel = escolha.split(" - ")[0]
         row = base[base["CÓDIGO"] == c_sel].iloc[0]
@@ -127,16 +127,17 @@ with st.form("form_adicao", clear_on_submit=True):
         st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo_man], ignore_index=True)
         st.rerun()
 
-# 4. TABELA DE RESUMO E PDF (Layout Profissional)
+# 4. TABELA DE RESUMO E PDF
 st.divider()
 if not st.session_state.itens_orcamento.empty:
-    st.markdown("### 📋 Resumo")
+    st.markdown("### 📋 Resumo do Orçamento")
     col_iva, _ = st.columns([1, 4])
-    taxa_iva = col_iva.selectbox("IVA:", [23, 13, 6, 0], format_func=lambda x: f"{x}%" if x > 0 else "Isento")
+    taxa_iva = col_iva.selectbox("Taxa de IVA:", [23, 13, 6, 0], format_func=lambda x: f"{x}%" if x > 0 else "Isento")
 
     df_calc = st.session_state.itens_orcamento.copy()
     df_calc["Subtotal"] = df_calc["Quantidade"] * df_calc["Preço Unitário"]
     
+    # Editor de dados para ajustes finais
     df_editado = st.data_editor(df_calc, use_container_width=True, hide_index=True)
     st.session_state.itens_orcamento = df_editado[["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"]]
     
