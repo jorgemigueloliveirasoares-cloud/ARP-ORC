@@ -23,7 +23,6 @@ def carregar_base():
         try:
             df = pd.read_excel(caminho)
             df.columns = [str(c).strip() for c in df.columns]
-            # Coluna de preço conforme o seu ficheiro
             col_preco = "VALORES ATUAIS JANEIRO 2025" 
             df = df[["CÓDIGO", "DESCRIÇÃO", "UNID", col_preco]].dropna(subset=["CÓDIGO"])
             df.rename(columns={col_preco: "Preço Unitário"}, inplace=True)
@@ -56,7 +55,7 @@ with col_rasc:
 
 st.divider()
 
-# 3. ADIÇÃO DE ITENS
+# 3. ADIÇÃO DE ITENS (CORREÇÃO DA OPÇÃO A)
 st.subheader("🔍 1. Adicionar Itens")
 base = carregar_base()
 lista_artigos = base.apply(lambda x: f"{x['CÓDIGO']} - {x['DESCRIÇÃO']}", axis=1).tolist()
@@ -67,20 +66,24 @@ with st.form("form_adicao", clear_on_submit=True):
     col_pesq, col_unid_t, col_prec_t, col_qtd_t = st.columns([2, 0.5, 0.7, 0.6])
     
     with col_pesq:
+        # A seleção dispara a atualização dos campos abaixo
         escolha = st.selectbox("Pesquise o código ou nome do artigo:", options=[""] + lista_artigos, index=0)
     
-    # Busca automática de dados da tabela
-    u_tab_val, p_tab_val = "", 0.0
+    # Lógica para extrair dados da tabela com base na escolha
+    unid_auto = ""
+    preco_auto = 0.0
     if escolha:
-        c_sel = escolha.split(" - ")[0]
-        match = base[base["CÓDIGO"] == c_sel].iloc[0]
-        u_tab_val = str(match["UNID"])
-        p_tab_val = float(match["Preço Unitário"])
+        codigo_selecionado = escolha.split(" - ")[0]
+        dados_item = base[base["CÓDIGO"] == codigo_selecionado].iloc[0]
+        unid_auto = str(dados_item["UNID"])
+        preco_auto = float(dados_item["Preço Unitário"])
 
     with col_unid_t:
-        st.text_input("Unid (Tabela)", value=u_tab_val, disabled=True, key="ut_display")
+        # Mostra a unidade da tabela (bloqueado para edição para manter integridade)
+        st.text_input("Unid (Tabela)", value=unid_auto, disabled=True, key="ut_show")
     with col_prec_t:
-        st.number_input("Preço Unit. €", value=p_tab_val, disabled=True, format="%.2f", key="pt_display")
+        # Mostra o preço da tabela
+        st.number_input("Preço Unit. €", value=preco_auto, disabled=True, format="%.2f", key="pt_show")
     with col_qtd_t:
         qtd_tab = st.number_input("Qtd", min_value=0.01, value=1.0, key="qtd_t_input")
 
@@ -102,29 +105,31 @@ with st.form("form_adicao", clear_on_submit=True):
     
     add_man = st.form_submit_button("➕ Adicionar Item Manual", use_container_width=True)
 
-    # Lógica de processamento
+    # Processamento das adições
     if add_tab and escolha:
-        c_sel = escolha.split(" - ")[0]
-        row = base[base["CÓDIGO"] == c_sel].iloc[0]
-        novo = pd.DataFrame([{
-            "CÓDIGO": row["CÓDIGO"],
-            "Artigo": row["DESCRIÇÃO"],
-            "UNID": row["UNID"],
-            "Preço Unitário": float(row["Preço Unitário"]),
-            "Quantidade": qtd_tab
-        }])
-        st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo], ignore_index=True)
+        st.session_state.itens_orcamento = pd.concat([
+            st.session_state.itens_orcamento, 
+            pd.DataFrame([{
+                "CÓDIGO": codigo_selecionado,
+                "Artigo": escolha.split(" - ", 1)[1],
+                "UNID": unid_auto,
+                "Preço Unitário": preco_auto,
+                "Quantidade": qtd_tab
+            }])
+        ], ignore_index=True)
         st.rerun()
 
     if add_man and item_manual:
-        novo_man = pd.DataFrame([{
-            "CÓDIGO": "MANUAL",
-            "Artigo": item_manual,
-            "UNID": unid_man,
-            "Preço Unitário": prec_man,
-            "Quantidade": qtd_man
-        }])
-        st.session_state.itens_orcamento = pd.concat([st.session_state.itens_orcamento, novo_man], ignore_index=True)
+        st.session_state.itens_orcamento = pd.concat([
+            st.session_state.itens_orcamento, 
+            pd.DataFrame([{
+                "CÓDIGO": "MANUAL",
+                "Artigo": item_manual,
+                "UNID": unid_man,
+                "Preço Unitário": prec_man,
+                "Quantidade": qtd_man
+            }])
+        ], ignore_index=True)
         st.rerun()
 
 # 4. TABELA DE RESUMO E PDF
@@ -137,7 +142,6 @@ if not st.session_state.itens_orcamento.empty:
     df_calc = st.session_state.itens_orcamento.copy()
     df_calc["Subtotal"] = df_calc["Quantidade"] * df_calc["Preço Unitário"]
     
-    # Editor de dados para ajustes finais
     df_editado = st.data_editor(df_calc, use_container_width=True, hide_index=True)
     st.session_state.itens_orcamento = df_editado[["CÓDIGO", "Artigo", "UNID", "Preço Unitário", "Quantidade"]]
     
